@@ -247,3 +247,62 @@ US2 (sidebar) sequences ahead of US4 (theme toggle lives in the sidebar).
 - All interactive components declare `"use client"`; `app/layout.tsx` stays a Server Component
 - `ChatInput` never mutates feed state directly — it dispatches through `useChat`/the store
 - Commit after each task or logical group; stop at any checkpoint to validate independently
+
+---
+
+# Amendment: Message Intent Routing (PayloadRouter) — 2026-07-01
+
+Covers spec **FR-024…FR-029** and **SC-008/SC-009**. New, unimplemented scope added after the
+base feature (T001–T033) was built and verified. Tagged **[US1]** — routing hooks into the
+User Story 1 message-send flow. Tests included (per plan/research; unit-level only).
+
+**Goal**: On submit, derive a structured `IntentPayload` for the message via a locally-mocked,
+async `routeMessage()` at `lib/router.ts`, fired **non-blocking** from `app/page.tsx handleSend`
+and attached to the stored message via a new `attachIntent` store action. No network, no UI
+surface, no new deps.
+
+**Independent Test**: Send a message → it appears instantly regardless of routing (SC-008);
+after routing resolves, the stored message carries a complete `intent` payload with a valid
+`model_tier` (SC-009); forcing `routeMessage` to reject leaves send + reply working (FR-028).
+
+## Phase 8: Message Intent Routing
+
+### Foundational (types)
+
+- [X] T034 [US1] Add `ModelTier` (`"flash" | "pro" | "reasoning"`), `IntentPayload` (`primary_action`, `requires_tools`, `entities`, `model_tier`), and optional `intent?: IntentPayload` on `Message` in `lib/types.ts` (FR-025, FR-029)
+
+### Tests (write first — expected to fail until implementation)
+
+- [X] T035 [P] [US1] Unit test `routeMessage` in `lib/__tests__/router.test.ts`: returns a complete payload (all 4 fields, correct types), `model_tier` ∈ tier set, deterministic for same input, `requires_tools` toggles true on keyword text (FR-025, FR-029, SC-009)
+- [X] T036 [P] [US1] Unit test `attachIntent` in `store/__tests__/useChatStore.test.ts`: attaches payload to the correct message; no-op on unknown conversation/message ids (FR-024, FR-028)
+
+### Implementation
+
+- [X] T037 [US1] Implement `export async function routeMessage(text: string): Promise<IntentPayload>` in `lib/router.ts` — deterministic local heuristic (no `fetch`, no live AI): classify `primary_action`, keyword-match `requires_tools`, extract+dedupe `entities`, map `model_tier`; always returns a complete payload (FR-024, FR-025, FR-027, FR-029) — depends on T034
+- [X] T038 [US1] Add `attachIntent(conversationId, messageId, payload)` action to `store/useChatStore.ts` — sets `intent` on the matching message; no-op if absent; does not change order/`updatedAt`/reply flow (FR-024, FR-028) — depends on T034
+- [X] T039 [US1] Wire non-blocking routing in `app/page.tsx` `handleSend`: after the optimistic user append + existing mock-reply flow, call `routeMessage(text).then(p => attachIntent(conversationId, userMessage.id, p)).catch(() => {})` — **not awaited** (FR-026, FR-028, SC-008) — depends on T037, T038
+
+### Verification
+
+- [X] T040 [US1] Run `pnpm test` (router + attachIntent green), `pnpm exec tsc --noEmit`, and `pnpm lint` — confirm no `any` and no type/lint errors
+- [X] T041 [US1] Browser-verify SC-008/SC-009: message appears instantly regardless of routing; stored message gains a complete `intent` payload with a valid `model_tier`; a forced `routeMessage` rejection never blocks/drops the send or errors the UI (FR-028)
+
+**Checkpoint**: Intent routing works end-to-end, send stays instant, all tests green.
+
+## Dependencies (Amendment)
+
+- T034 (types) blocks T035–T039.
+- T035, T036 (tests) are written before T037/T038 and fail until those land (TDD).
+- T037 and T038 are independent (different files) → parallelizable after T034.
+- T039 depends on T037 + T038. T040/T041 depend on T039.
+
+## Parallel Example (Amendment)
+
+```bash
+# After T034 (types):
+Task: "Unit test routeMessage in lib/__tests__/router.test.ts"          # T035
+Task: "Unit test attachIntent in store/__tests__/useChatStore.test.ts"  # T036
+# Then implement in parallel:
+Task: "Implement routeMessage in lib/router.ts"                          # T037
+Task: "Add attachIntent action to store/useChatStore.ts"                # T038
+```

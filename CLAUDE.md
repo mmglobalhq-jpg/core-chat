@@ -11,6 +11,9 @@ shell commands, and other important information, read the current plan
   `textarea`, `button` (generate via CLI; never hand-author an equivalent)
 - **State**: Zustand (`store/useChatStore.ts`) — model + conversations + active thread
 - **Chat state**: Vercel AI SDK `useChat` (`@ai-sdk/react`) with a local mock transport (no backend)
+- **Intent routing (amendment)**: `lib/router.ts` `routeMessage(text): Promise<IntentPayload>`
+  — mocked local heuristic (no live AI, FR-027); async seam for a future Gemini server route.
+  Invoked non-blocking from `app/page.tsx handleSend`; payload attached via store `attachIntent`.
 - **Theming**: `next-themes` (class strategy) + `components/theme/ThemeProvider.tsx`
 - **Icons**: `lucide-react`
 - **Testing**: Vitest + React Testing Library (store logic, `canSend`, `mockReply`)

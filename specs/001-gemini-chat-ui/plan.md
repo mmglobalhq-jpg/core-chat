@@ -121,3 +121,96 @@ types and mock data live in `lib/` to keep components and the store decoupled (P
 ## Complexity Tracking
 
 > No Constitution Check violations. This section is intentionally empty.
+
+---
+
+# Amendment: Message Intent Routing (PayloadRouter) — 2026-07-01
+
+Covers spec FR-024…FR-029, SC-008/SC-009, and the `Intent Payload` entity. Additive to the
+plan above; nothing prior changes.
+
+## Summary
+
+On message submit, derive a structured **intent payload** for the raw text via a
+`PayloadRouter` service at `lib/router.ts`. For this phase the router is **mocked locally**
+(heuristics over the text, no live AI — honors FR-022) behind an **async** interface so a
+real Gemini-backed implementation (via a server route) can replace it later without touching
+callers. Routing is **non-blocking / optimistic**: the user message renders instantly and the
+mocked assistant reply flow is unchanged; the payload attaches to the stored message when
+routing resolves. Failure is swallowed gracefully (FR-028).
+
+## Technical Context (additions)
+
+- **New module**: `lib/router.ts` — pure TS module exporting
+  `routeMessage(text: string): Promise<IntentPayload>` and the `IntentPayload` / `ModelTier`
+  types. Not a component; no `"use client"` needed.
+- **Type additions**: `IntentPayload`, `ModelTier` in `lib/types.ts`; `Message` gains an
+  optional `intent?: IntentPayload`.
+- **Store**: new action `attachIntent(conversationId, messageId, payload)` in
+  `store/useChatStore.ts`.
+- **Wiring**: invoked from the **submit handler in `app/page.tsx`** (`handleSend`), not from
+  inside `ChatInput.tsx` — see Constitution re-check IV.
+- **Testing**: Vitest unit tests for `routeMessage` (complete payload, correct types,
+  `model_tier` ∈ tier set, deterministic) and the `attachIntent` store action.
+- **No new dependencies.** No network. No UI surface (payload is in-memory, advisory).
+
+## Constitution Re-Check (Amendment)
+
+| Principle | Assessment | Status |
+|-----------|------------|--------|
+| I. shadcn Primitives First | No new UI. | ✅ N/A |
+| II. Strict TS (no `any`) | `IntentPayload`/`ModelTier` fully typed; router returns a typed payload. | ✅ PASS |
+| III. Client/Server Boundaries | `lib/router.ts` is a plain async module (no component). Deferred real Gemini would live behind a **server route** to keep the key server-side — never called from the client directly. | ✅ PASS |
+| IV. Decoupled Architecture | Routing is invoked in the **submit handler (`page.tsx handleSend`)**, not inside `ChatInput`. `ChatInput` stays a dumb input calling `onSend`. Payload flows to the message via the store action, not prop-drilled feed state. | ✅ PASS |
+| V. Layout & Theming | Unaffected. | ✅ N/A |
+| FR-022 (fully mocked) | Router derives payload locally; no live service. | ✅ PASS |
+
+**Interpretation note (IV):** the request says "invoked by the ChatInput submission logic."
+The submission logic lives in `page.tsx`'s `handleSend` (ChatInput only calls `onSend`).
+Invoking there — not inside `ChatInput.tsx` — is what preserves the decoupling the
+constitution mandates. Behavior is identical from the user's view.
+
+**Result**: All gates pass. No violations, no Complexity Tracking entry.
+
+## Structure (additions)
+
+```text
+lib/
+├── router.ts                 # PayloadRouter: routeMessage() + IntentPayload/ModelTier types (mock)
+├── types.ts                  # + IntentPayload, ModelTier; Message.intent?
+└── __tests__/router.test.ts  # routeMessage unit tests
+store/
+├── useChatStore.ts           # + attachIntent action
+└── __tests__/useChatStore.test.ts  # + attachIntent test
+app/
+└── page.tsx                  # handleSend fires routeMessage() non-blocking, then attachIntent()
+```
+
+## Design details
+
+- **`ModelTier`** = `"flash" | "pro" | "reasoning"` (finite, per FR-029 / SC-009).
+- **`IntentPayload`** = `{ primary_action: string; requires_tools: boolean; entities: string[];
+  model_tier: ModelTier }` — always fully populated.
+- **Mock heuristic (`routeMessage`)** — deterministic for testability:
+  - `primary_action`: classify from text (e.g. trailing `?` → `"question"`; leading
+    imperative verb like write/create/build/summarize → that verb; else `"chat"`).
+  - `requires_tools`: `true` if text matches a small keyword set (search, browse, calculate,
+    weather, email, translate, run, code); else `false`.
+  - `entities`: naive extraction (capitalized tokens / quoted spans), de-duplicated.
+  - `model_tier`: `requires_tools` or long/complex text → `"pro"`; very long/multi-step →
+    `"reasoning"`; else `"flash"`.
+  - Returns via a resolved Promise (optionally a tiny simulated delay) — async shape only, no
+    network.
+- **Non-blocking wiring** (`page.tsx handleSend`): after the optimistic user append +
+  existing mock-reply flow, call `routeMessage(text)`, and on resolve call
+  `attachIntent(conversationId, userMessage.id, payload)`. Wrap in `.catch(() => {})` so a
+  failure is inert (FR-028). Nothing awaits routing before rendering (FR-026 / SC-008).
+- **`attachIntent`**: updates the matching message's `intent` field in the store; no-op if the
+  message/conversation is gone.
+
+## Deferred (explicitly out of scope this phase)
+
+- Real Gemini 2.5 Flash call — lands later behind `routeMessage`'s interface via a Next.js
+  **server route** (key server-side). That is a governed change (touches the constitution's
+  frontend-only mandate) and gets its own amendment.
+- Surfacing the payload in the UI. In-memory + advisory only for now.

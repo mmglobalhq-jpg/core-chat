@@ -107,3 +107,50 @@ below lock the mandated stack (constitution + user plan input) to concrete patte
 | Textarea/Send | shadcn primitive + `scrollHeight` autosize + `trim()` gate |
 | Tailwind/shadcn | v4 CSS-first; generate 6 primitives via CLI |
 | Tests | Vitest/RTL on store + gating + mock generator |
+
+---
+
+# Amendment Research: Message Intent Routing (PayloadRouter) — 2026-07-01
+
+## 9. Where to invoke routing (decoupling)
+
+- **Decision**: Invoke `routeMessage()` from **`page.tsx`'s `handleSend`** (the submit
+  handler), not from inside `ChatInput.tsx`. `ChatInput` stays a dumb input that calls
+  `onSend(text)`.
+- **Rationale**: Constitution Principle IV — the input must not own send/feed logic. The
+  "ChatInput submission logic" in the request maps to the handler that `onSend` triggers,
+  which already lives in `page.tsx`. User-visible behavior is identical.
+- **Alternatives**: Calling inside `ChatInput.tsx` (rejected: couples the input to routing +
+  store); a store action that both appends and routes (viable, but keeps routing orchestration
+  in the same place as the existing send flow in `page.tsx` — chose the handler for locality).
+
+## 10. Blocking vs non-blocking
+
+- **Decision**: Non-blocking / optimistic. The user message and the mocked reply flow proceed
+  immediately; `routeMessage()` runs in the background and its payload is attached on resolve.
+- **Rationale**: FR-026 / SC-008 and preservation of the verified instant-send UX (SC-001).
+  A routing failure/timeout must never block or drop a send (FR-028), so the call is
+  fire-and-forget with a swallowed catch.
+- **Alternatives**: Awaiting routing before showing the message (rejected by the user — adds
+  latency and a failure point to every send).
+
+## 11. Mock now, real Gemini later (interface shape)
+
+- **Decision**: `routeMessage(text: string): Promise<IntentPayload>` — async even though the
+  mock is synchronous work — so a future real implementation (Gemini via a server route) is a
+  drop-in with no caller changes. Mock derives the payload with local heuristics.
+- **Rationale**: FR-027. Keeps the phase frontend-only (FR-022) while making the seam explicit.
+  Async return type is the one design choice that matters for future-proofing.
+- **Alternatives**: Sync `routeMessage` returning the payload (rejected: a real model call is
+  async; a sync signature would force a breaking change later). Calling Gemini from the client
+  now (rejected: exposes the API key; violates the constitution — governed change).
+
+## 12. Payload shape & determinism
+
+- **Decision**: `IntentPayload = { primary_action: string; requires_tools: boolean;
+  entities: string[]; model_tier: ModelTier }` with `ModelTier = "flash" | "pro" | "reasoning"`.
+  The mock is deterministic (pure function of the text).
+- **Rationale**: FR-025/FR-029/SC-009 require a complete, well-typed payload with a finite
+  `model_tier`. Determinism makes it unit-testable without stubbing randomness/time.
+- **Alternatives**: Free-string `model_tier` (rejected: not testable/unambiguous). Randomized
+  mock output (rejected: flaky tests, no benefit).

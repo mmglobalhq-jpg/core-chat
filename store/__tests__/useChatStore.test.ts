@@ -90,3 +90,43 @@ describe("appendMessage (FR-013/FR-014)", () => {
     expect(conv?.title).toContain("What is the capital");
   });
 });
+
+describe("attachIntent (FR-024, FR-028)", () => {
+  const payload = {
+    primary_action: "question",
+    requires_tools: false,
+    entities: ["France"],
+    model_tier: "flash" as const,
+  };
+
+  it("attaches the payload to the correct message", () => {
+    const convId = useChatStore.getState().conversations[0].id;
+    useChatStore.getState().appendMessage(convId, {
+      id: "m-intent",
+      role: "user",
+      content: "What is the capital of France?",
+      createdAt: 1,
+    });
+
+    useChatStore.getState().attachIntent(convId, "m-intent", payload);
+
+    const msg = useChatStore
+      .getState()
+      .conversations.find((c) => c.id === convId)
+      ?.messages.find((m) => m.id === "m-intent");
+    expect(msg?.intent).toEqual(payload);
+  });
+
+  it("is a no-op for an unknown conversation id", () => {
+    const before = useChatStore.getState().conversations;
+    useChatStore.getState().attachIntent("nope", "m-intent", payload);
+    expect(useChatStore.getState().conversations).toEqual(before);
+  });
+
+  it("is a no-op for an unknown message id (does not throw)", () => {
+    const convId = useChatStore.getState().conversations[0].id;
+    expect(() =>
+      useChatStore.getState().attachIntent(convId, "does-not-exist", payload),
+    ).not.toThrow();
+  });
+});

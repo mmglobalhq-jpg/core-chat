@@ -9,6 +9,7 @@ import { ChatFeed } from "@/components/chat/ChatFeed";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { useChatStore } from "@/store/useChatStore";
 import { createId, mockReply } from "@/lib/mock-data";
+import { routeMessage } from "@/lib/router";
 import type { Message } from "@/lib/types";
 
 function toUIMessage(message: Message): UIMessage {
@@ -19,6 +20,7 @@ export default function Home() {
   const activeConversationId = useChatStore((s) => s.activeConversationId);
   const conversations = useChatStore((s) => s.conversations);
   const appendMessage = useChatStore((s) => s.appendMessage);
+  const attachIntent = useChatStore((s) => s.attachIntent);
 
   const { messages, setMessages } = useChat({
     id: activeConversationId ?? "new",
@@ -53,6 +55,15 @@ export default function Home() {
       setMessages((prev) => [...prev, toUIMessage(userMessage)]);
       appendMessage(conversationId, userMessage);
 
+      // Non-blocking intent routing (FR-026 / SC-008): fire-and-forget, attach
+      // the payload when it resolves; a failure is inert (FR-028). Nothing here
+      // is awaited, so the message + reply flow are never delayed by routing.
+      routeMessage(text)
+        .then((payload) =>
+          attachIntent(conversationId, userMessage.id, payload),
+        )
+        .catch(() => {});
+
       const reply = { ...mockReply(text), createdAt: Date.now() };
       // Small simulated delay so the reply reads as a response, not an echo.
       window.setTimeout(() => {
@@ -60,7 +71,7 @@ export default function Home() {
         appendMessage(conversationId, reply);
       }, 350);
     },
-    [activeConversationId, appendMessage, setMessages],
+    [activeConversationId, appendMessage, attachIntent, setMessages],
   );
 
   return (

@@ -98,3 +98,31 @@ pnpm vitest run
 ```
 
 Cover `canSend`, `mockReply`, and store actions (per research.md §8).
+
+---
+
+## 10. Amendment — Message Intent Routing (PayloadRouter)
+
+No new dependencies; no network; no UI surface. Steps:
+
+1. **Types** (`lib/types.ts`): add `ModelTier` and `IntentPayload`; add optional `intent?:
+   IntentPayload` to `Message`.
+2. **Router** (`lib/router.ts`): implement
+   `export async function routeMessage(text: string): Promise<IntentPayload>` — deterministic
+   local heuristic returning a complete payload (see plan §Design details). No `fetch`.
+3. **Store** (`store/useChatStore.ts`): add
+   `attachIntent(conversationId, messageId, payload)` — sets `intent` on the message; no-op on
+   unknown ids.
+4. **Wire** (`app/page.tsx handleSend`): after the optimistic append + existing reply flow,
+   `routeMessage(text).then(p => attachIntent(convId, userMsg.id, p)).catch(() => {})` —
+   **not awaited** (non-blocking).
+5. **Tests**: `lib/__tests__/router.test.ts` (complete payload, types, `model_tier` in set,
+   determinism, `requires_tools` keyword toggle) and a store test for `attachIntent`.
+
+**Verify (maps to SC-008/SC-009):**
+- Send a message → it appears instantly (routing never blocks); after resolve, the stored
+  message carries a complete `intent` payload with a valid `model_tier`.
+- Force `routeMessage` to reject → message + reply still work, no error surfaced (FR-028).
+
+> **Deferred:** real Gemini 2.5 Flash call lands later behind `routeMessage` via a Next.js
+> **server route** (API key server-side) — a separate governed change.

@@ -1,5 +1,10 @@
 import { create } from "zustand";
-import type { Conversation, Message, ModelId } from "@/lib/types";
+import type {
+  Conversation,
+  IntentPayload,
+  Message,
+  ModelId,
+} from "@/lib/types";
 import {
   DEFAULT_MODEL_ID,
   createId,
@@ -19,6 +24,13 @@ interface ChatStore {
   newConversation: () => void;
   selectConversation: (id: string) => void;
   appendMessage: (conversationId: string, message: Message) => void;
+
+  // Intent routing (amendment / FR-024, FR-028)
+  attachIntent: (
+    conversationId: string,
+    messageId: string,
+    payload: IntentPayload,
+  ) => void;
 
   // Derived helper
   activeConversation: () => Conversation | null;
@@ -78,11 +90,35 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     }));
   },
 
+  attachIntent: (conversationId, messageId, payload) => {
+    // No-op if the conversation or message is gone (graceful — FR-028).
+    // Does not touch message order, updatedAt, or the reply flow.
+    set((state) => ({
+      conversations: state.conversations.map((c) =>
+        c.id === conversationId
+          ? {
+              ...c,
+              messages: c.messages.map((m) =>
+                m.id === messageId ? { ...m, intent: payload } : m,
+              ),
+            }
+          : c,
+      ),
+    }));
+  },
+
   activeConversation: () => {
     const { conversations, activeConversationId } = get();
     return conversations.find((c) => c.id === activeConversationId) ?? null;
   },
 }));
+
+// Development-only debug handle (stripped from production builds). Lets tooling
+// inspect store state (e.g. attached intent payloads) at runtime.
+if (process.env.NODE_ENV !== "production" && typeof window !== "undefined") {
+  (window as unknown as { __chatStore?: typeof useChatStore }).__chatStore =
+    useChatStore;
+}
 
 function deriveTitle(content: string): string {
   const trimmed = content.trim();

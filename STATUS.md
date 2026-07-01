@@ -15,9 +15,10 @@ Spec-Driven Development completed end to end for the first feature:
 | Constitution | `.specify/memory/constitution.md` | ✅ v1.0.0 ratified |
 | Specify | `specs/001-gemini-chat-ui/spec.md` | ✅ Approved (checklist 16/16) |
 | Plan | `specs/001-gemini-chat-ui/plan.md` (+ research, data-model, contracts, quickstart) | ✅ Complete |
-| Tasks | `specs/001-gemini-chat-ui/tasks.md` | ✅ 33/33 done |
+| Tasks | `specs/001-gemini-chat-ui/tasks.md` | ✅ 41/41 done (incl. amendment) |
 | Implement | app source (see §4) | ✅ Complete |
 | Verify | build + lint + typecheck + tests + browser drive | ✅ PASS |
+| Amendment | Message Intent Routing (PayloadRouter, FR-024…FR-029) | ✅ Implemented + verified |
 
 The app is a working, distraction-free Gemini clone: collapsible sidebar, model-selector
 header, centered chat feed, floating pill input, light/dark theming — with **all backend,
@@ -34,6 +35,10 @@ AI responses, and history mocked locally**.
 - **Zustand 5** — `store/useChatStore.ts` (model + conversations + active thread)
 - **Vercel AI SDK `useChat`** (`@ai-sdk/react` 1.2.12 / `ai` 4.3.19) — driven by a local
   mock (no network); replies come from `mockReply()`
+- **Intent routing (amendment)** — `lib/router.ts` `routeMessage()` mocked local heuristic
+  (no live AI); fired non-blocking from `handleSend`, payload attached via store `attachIntent`.
+  Real Gemini deferred behind the same async interface (server route). A **dev-only**
+  `window.__chatStore` debug handle exists and is stripped from production builds.
 - **next-themes** — class strategy, system default, persisted
 - **Vitest + Testing Library** — unit tests
 - **Package manager:** pnpm

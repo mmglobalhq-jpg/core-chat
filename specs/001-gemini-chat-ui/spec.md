@@ -4,7 +4,17 @@
 
 **Created**: 2026-07-01
 
-**Status**: Draft
+**Status**: Draft (Amended 2026-07-01 — added Message Intent Routing, FR-024…FR-029)
+
+**Amendments**:
+- **2026-07-01 — Message Intent Routing (PayloadRouter).** Added a message-intent routing
+  capability that derives a structured intent payload from each submitted message.
+  Decisions: routing is **mocked locally** (honors FR-022; no live AI service) with the
+  interface shaped so a real model-backed implementation can replace the mock later; routing
+  is **non-blocking / optimistic** (the message renders instantly, the payload attaches when
+  routing resolves). Implementation specifics deliberately noted in Assumptions (service
+  name/location) and deferred to the plan. This is new, not-yet-implemented scope; re-run
+  `/speckit.plan` and `/speckit.tasks` for it.
 
 **Input**: User description: "Build a responsive, pixel-perfect clone of the Gemini web UI to serve as the front-end for a personal AI assistant. The interface must be distraction-free and cleanly separate the navigation controls from the conversational feed. Three visual zones: a collapsible left sidebar (New Chat button, scrollable recent history, settings/theme toggle pinned at bottom, subtle off-color background); a top header with a minimalist borderless model-selector dropdown (Gemini 2.5 Flash, DeepSeek V4 Pro, GPT-5.5); a main chat & input area with a centered max-width feed (user messages right, AI messages left) and a floating pill-shaped input containing a '+' attachment button, an auto-expanding textarea, and a Send button that only activates when text is present. Seamless light and dark modes. Frontend only; all backend calls, AI responses, and chat history are mocked locally."
 
@@ -195,6 +205,27 @@ feed, input bar) re-colors consistently with no unreadable or unstyled elements.
 - **FR-023**: The mocked chat history MUST populate the sidebar with a set of sample
   conversations so history browsing can be demonstrated.
 
+**Message Intent Routing (Amendment 2026-07-01)**
+
+- **FR-024**: When a user submits a message, the system MUST route the raw text through a
+  dedicated intent-routing service (the "PayloadRouter") that derives a structured intent
+  payload for that message.
+- **FR-025**: The intent payload MUST contain exactly these fields: `primary_action`
+  (string), `requires_tools` (boolean), `entities` (array of strings), and `model_tier`
+  (string).
+- **FR-026**: Intent routing MUST be non-blocking and optimistic: the user's message MUST
+  appear in the feed immediately on submit, and the assistant reply flow MUST NOT be delayed
+  waiting for routing. The intent payload MUST attach to the message once routing resolves.
+- **FR-027**: Intent routing MUST be mocked locally and MUST NOT depend on any live AI
+  service or backend (consistent with FR-022). The routing interface MUST be defined so a
+  real model-backed implementation can replace the mock without changing its callers.
+- **FR-028**: If routing fails, times out, or returns nothing, the message MUST still be
+  delivered and the conversation MUST continue unaffected (graceful degradation); the absent
+  payload MUST NOT block or error the send flow.
+- **FR-029**: `model_tier` MUST be drawn from a defined, finite set of tier values (so it is
+  testable and unambiguous), and the routing MUST always return a complete payload with all
+  four fields populated (no partial payloads).
+
 ### Key Entities *(include if feature involves data)*
 
 - **Conversation**: A single chat thread. Has a title/label (shown in sidebar history),
@@ -207,6 +238,11 @@ feed, input bar) re-colors consistently with no unreadable or unstyled elements.
   set of three named options.
 - **Theme Preference**: The active appearance mode (light or dark), persisted across
   sessions.
+- **Intent Payload**: A structured interpretation of a submitted message, derived by the
+  routing service. Fields: `primary_action` (the main thing the user wants), `requires_tools`
+  (whether fulfilling it would need external tools/actions), `entities` (salient names/things
+  extracted from the text), `model_tier` (a suggested capability tier for handling it).
+  Associated with the `Message` it was derived from; attaches after the message is displayed.
 
 ## Success Criteria *(mandatory)*
 
@@ -228,6 +264,11 @@ feed, input bar) re-colors consistently with no unreadable or unstyled elements.
   narrow screens.
 - **SC-007**: A user can switch conversations from the sidebar and see the correct thread
   load, and can start a new empty chat, in 100% of attempts.
+- **SC-008**: Message send remains instant: the user's message appears in the feed on submit
+  regardless of routing state, and a routing failure never prevents message delivery (0%
+  blocked or dropped sends across success, failure, and timeout cases).
+- **SC-009**: Every routed message yields a complete intent payload — all four fields present
+  and correctly typed, with `model_tier` from the defined tier set — in 100% of attempts.
 
 ## Assumptions
 
@@ -250,3 +291,18 @@ feed, input bar) re-colors consistently with no unreadable or unstyled elements.
   is a personal single-user assistant shell.
 - **Responsiveness**: On narrow viewports the sidebar collapses or overlays rather than
   permanently occupying horizontal space.
+- **PayloadRouter (directed technical detail)**: Per the amendment request, the routing
+  service is named **PayloadRouter** and lives at **`/lib/router.ts`**, invoked from the
+  `ChatInput` submission path. For this frontend-only phase it MUST derive the intent payload
+  **locally/mocked** (e.g., lightweight heuristics over the text) rather than calling a live
+  model. The originally requested "call the Gemini 2.5 Flash API" is **deferred**: the mock
+  MUST expose the same async interface so a real Gemini-backed call (behind a server route to
+  keep the API key server-side) can drop in later without changing callers. Going live with a
+  real API is a separate, governed change (it would require amending the constitution's
+  frontend-only / fully-mocked mandate).
+- **`model_tier` value set**: Assumed to be one of `"flash" | "pro" | "reasoning"` (a small,
+  finite set) for this phase; exact tier names can be refined in the plan without changing the
+  payload contract.
+- **Intent payload persistence**: The payload is in-memory only for this phase and is not
+  persisted or shown in the UI; it is available to downstream logic. Surfacing it in the UI is
+  out of scope for this amendment.
