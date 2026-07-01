@@ -75,14 +75,14 @@ export default function Home() {
   );
 
   return (
-    <div className="flex h-full overflow-hidden bg-background">
+    <div className="flex h-screen w-full overflow-hidden bg-background">
       <Sidebar
         collapsed={collapsed}
         onToggle={() => setCollapsed((c) => !c)}
         mobileOpen={mobileOpen}
         onMobileOpenChange={setMobileOpen}
       />
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="relative flex h-full min-w-0 flex-1 flex-col">
         <Header
           onMenuClick={() => setMobileOpen(true)}
           onToggleSidebar={() => setCollapsed((c) => !c)}
