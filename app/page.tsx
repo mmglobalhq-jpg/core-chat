@@ -8,8 +8,8 @@ import { Header } from "@/components/layout/Header";
 import { ChatFeed } from "@/components/chat/ChatFeed";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { useChatStore } from "@/store/useChatStore";
-import { createId, mockReply } from "@/lib/mock-data";
-import { routeMessage } from "@/lib/router";
+import { createId } from "@/lib/mock-data";
+import { routeMessage, submitIntent } from "@/lib/router";
 import type { Message } from "@/lib/types";
 
 function toUIMessage(message: Message): UIMessage {
@@ -21,6 +21,7 @@ export default function Home() {
   const conversations = useChatStore((s) => s.conversations);
   const appendMessage = useChatStore((s) => s.appendMessage);
   const attachIntent = useChatStore((s) => s.attachIntent);
+  const selectedModelId = useChatStore((s) => s.selectedModelId);
 
   const { messages, setMessages } = useChat({
     id: activeConversationId ?? "new",
@@ -42,7 +43,7 @@ export default function Home() {
   }, [activeConversationId]);
 
   const handleSend = useCallback(
-    (text: string) => {
+    async (text: string) => {
       const conversationId = activeConversationId;
       if (!conversationId) return;
 
@@ -55,23 +56,35 @@ export default function Home() {
       setMessages((prev) => [...prev, toUIMessage(userMessage)]);
       appendMessage(conversationId, userMessage);
 
-      // Non-blocking intent routing (FR-026 / SC-008): fire-and-forget, attach
-      // the payload when it resolves; a failure is inert (FR-028). Nothing here
-      // is awaited, so the message + reply flow are never delayed by routing.
-      routeMessage(text)
-        .then((payload) =>
-          attachIntent(conversationId, userMessage.id, payload),
-        )
-        .catch(() => {});
+      // Local heuristic intent — still attached to the message (FR-026) and used
+      // to populate the gateway payload's `intent` / `entities` fields.
+      const localIntent = await routeMessage(text);
+      attachIntent(conversationId, userMessage.id, localIntent);
 
-      const reply = { ...mockReply(text), createdAt: Date.now() };
-      // Small simulated delay so the reply reads as a response, not an echo.
-      window.setTimeout(() => {
-        setMessages((prev) => [...prev, toUIMessage(reply)]);
-        appendMessage(conversationId, reply);
-      }, 350);
+      // Optimistic pending assistant bubble while the gateway call is in flight.
+      const replyId = createId("assistant");
+      setMessages((prev) => [...prev, { id: replyId, role: "assistant", content: "…" }]);
+
+      // Real gateway call via the same-origin proxy (server-side -> backend).
+      const reply = await submitIntent({
+        intent: localIntent.primary_action,
+        rawInput: text,
+        modelPreference: selectedModelId,
+        entities: localIntent.entities,
+      });
+
+      const assistant: Message = {
+        id: replyId,
+        role: "assistant",
+        content: reply.text,
+        createdAt: Date.now(),
+      };
+      setMessages((prev) =>
+        prev.map((m) => (m.id === replyId ? toUIMessage(assistant) : m)),
+      );
+      appendMessage(conversationId, assistant);
     },
-    [activeConversationId, appendMessage, attachIntent, setMessages],
+    [activeConversationId, appendMessage, attachIntent, selectedModelId, setMessages],
   );
 
   return (
