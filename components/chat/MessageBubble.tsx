@@ -3,13 +3,34 @@
 import { Sparkles } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
+import type { RouteMeta } from "@/lib/types";
 
 interface MessageBubbleProps {
   role: "user" | "assistant";
   content: string;
+  meta?: RouteMeta;
 }
 
-export function MessageBubble({ role, content }: MessageBubbleProps) {
+/** "local_llm" -> "Local LLM"; keeps LLM/API/ID acronyms uppercase. */
+function prettyNode(node: string): string {
+  const ACRONYMS = new Set(["llm", "api", "id"]);
+  return node
+    .split(/[_-]/)
+    .filter(Boolean)
+    .map((word) =>
+      ACRONYMS.has(word.toLowerCase())
+        ? word.toUpperCase()
+        : word.charAt(0).toUpperCase() + word.slice(1),
+    )
+    .join(" ");
+}
+
+function formatRoute(meta: RouteMeta): string {
+  const path = [meta.model, ...meta.nodes.map(prettyNode)];
+  return `[${path.join(" → ")}]`;
+}
+
+export function MessageBubble({ role, content, meta }: MessageBubbleProps) {
   const isUser = role === "user";
 
   return (
@@ -29,13 +50,26 @@ export function MessageBubble({ role, content }: MessageBubbleProps) {
 
       <div
         className={cn(
-          "max-w-[80%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap break-words",
-          isUser
-            ? "rounded-br-md bg-primary text-primary-foreground"
-            : "rounded-bl-md bg-muted text-foreground",
+          "flex max-w-[80%] flex-col gap-1",
+          isUser ? "items-end" : "items-start",
         )}
       >
-        {content}
+        <div
+          className={cn(
+            "rounded-2xl px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap break-words",
+            isUser
+              ? "rounded-br-md bg-primary text-primary-foreground"
+              : "rounded-bl-md bg-muted text-foreground",
+          )}
+        >
+          {content}
+        </div>
+
+        {!isUser && meta && (
+          <span className="rounded-full border border-border bg-muted/50 px-2 py-0.5 font-mono text-[11px] font-medium text-muted-foreground">
+            {formatRoute(meta)}
+          </span>
+        )}
       </div>
     </div>
   );

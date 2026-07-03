@@ -86,3 +86,40 @@ function deriveModelTier(text: string): ModelTier {
   if (deriveRequiresTools(text) || wordCount > 25) return "pro";
   return "flash";
 }
+
+/** Normalized reply the chat feed renders, produced by the /api/intent proxy. */
+export interface GatewayReply {
+  ok: boolean;
+  text: string;
+  outcome?: string | null;
+  status?: string | null;
+  /** Backend orchestration `nodes_executed` for the routing badge. */
+  route?: string[];
+}
+
+/**
+ * Submit a message to the live gateway via the same-origin server proxy
+ * (`app/api/intent/route.ts`). The proxy avoids CORS and maps the backend's
+ * IntentPayload/orchestration envelope to { ok, text, ... }. A network failure
+ * is returned as a graceful non-ok reply rather than thrown.
+ */
+export async function submitIntent(args: {
+  intent: string;
+  rawInput: string;
+  modelPreference: string;
+  entities?: string[];
+}): Promise<GatewayReply> {
+  try {
+    const res = await fetch("/api/intent", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(args),
+    });
+    return (await res.json()) as GatewayReply;
+  } catch (err) {
+    return {
+      ok: false,
+      text: `⚠️ Network error contacting the app server: ${(err as Error).message}`,
+    };
+  }
+}
