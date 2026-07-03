@@ -3,8 +3,8 @@ import type { Conversation, Message, ModelId, ModelOption } from "@/lib/types";
 /** The only three selectable models (FR-010). */
 export const MODEL_OPTIONS: ModelOption[] = [
   { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
-  { id: "deepseek-v4-pro", label: "DeepSeek V4 Pro" },
-  { id: "gpt-5.5", label: "GPT-5.5" },
+  { id: "deepseek-v4-pro", label: "Claude Haiku 4.5" },
+  { id: "gpt-5.5", label: "GPT-4o Mini" },
 ];
 
 export const DEFAULT_MODEL_ID: ModelId = "gemini-2.5-flash";

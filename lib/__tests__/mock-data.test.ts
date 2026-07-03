@@ -39,8 +39,8 @@ describe("model options (FR-010)", () => {
   it("exposes exactly the three named models", () => {
     expect(MODEL_OPTIONS.map((m) => m.label)).toEqual([
       "Gemini 2.5 Flash",
-      "DeepSeek V4 Pro",
-      "GPT-5.5",
+      "Claude Haiku 4.5",
+      "GPT-4o Mini",
     ]);
   });
 
