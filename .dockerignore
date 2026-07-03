@@ -1,0 +1,15 @@
+# Keep the build context small and avoid baking host-only state into the image.
+node_modules
+.next
+.git
+.gitignore
+Dockerfile
+.dockerignore
+# Never bake local env into the image — the compose file injects runtime env.
+.env
+.env.*
+.vscode
+.claude
+.specify
+tsconfig.tsbuildinfo
+npm-debug.log*
