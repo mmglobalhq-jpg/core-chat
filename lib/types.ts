@@ -18,6 +18,14 @@ export interface IntentPayload {
   model_tier: ModelTier;
 }
 
+/** Which supervisor model was requested and which node(s) actually executed. */
+export interface RouteMeta {
+  /** Human label of the model selected in the dropdown at send time. */
+  model: string;
+  /** Backend orchestration `nodes_executed` (e.g. ["local_llm"]). */
+  nodes: string[];
+}
+
 export interface Message {
   id: string;
   role: Role;
@@ -25,6 +33,8 @@ export interface Message {
   createdAt: number;
   /** Attached asynchronously by attachIntent() once routing resolves (FR-026). */
   intent?: IntentPayload;
+  /** Routing path shown as a badge on assistant replies from the gateway. */
+  route?: RouteMeta;
 }
 
 export interface Conversation {

@@ -8,9 +8,9 @@ import { Header } from "@/components/layout/Header";
 import { ChatFeed } from "@/components/chat/ChatFeed";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { useChatStore } from "@/store/useChatStore";
-import { createId } from "@/lib/mock-data";
+import { createId, modelLabel } from "@/lib/mock-data";
 import { routeMessage, submitIntent } from "@/lib/router";
-import type { Message } from "@/lib/types";
+import type { Message, RouteMeta } from "@/lib/types";
 
 function toUIMessage(message: Message): UIMessage {
   return { id: message.id, role: message.role, content: message.content };
@@ -29,6 +29,15 @@ export default function Home() {
 
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  // Route badges are persisted on store messages; expose them to the feed as an
+  // id -> RouteMeta map so MessageBubble can render a badge without the extra
+  // fields having to travel through the AI SDK's UIMessage shape.
+  const routeById: Record<string, RouteMeta> = {};
+  for (const message of conversations.find((c) => c.id === activeConversationId)
+    ?.messages ?? []) {
+    if (message.route) routeById[message.id] = message.route;
+  }
 
   // Hydrate the feed from the store whenever the active conversation changes
   // (FR-007 clears, FR-008 loads). Intentionally keyed on the id only so live
@@ -78,6 +87,9 @@ export default function Home() {
         role: "assistant",
         content: reply.text,
         createdAt: Date.now(),
+        // Left = the supervisor model requested (dropdown at send time);
+        // right = the node(s) the backend actually ran (nodes_executed).
+        route: { model: modelLabel(selectedModelId), nodes: reply.route ?? [] },
       };
       setMessages((prev) =>
         prev.map((m) => (m.id === replyId ? toUIMessage(assistant) : m)),
@@ -101,7 +113,7 @@ export default function Home() {
           onToggleSidebar={() => setCollapsed((c) => !c)}
         />
         <main className="relative min-h-0 flex-1">
-          <ChatFeed messages={messages} />
+          <ChatFeed messages={messages} metaById={routeById} />
           <ChatInput onSend={handleSend} />
         </main>
       </div>

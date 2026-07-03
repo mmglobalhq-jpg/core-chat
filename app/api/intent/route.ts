@@ -27,6 +27,7 @@ interface OrchestrationMessage {
 interface Orchestration {
   status?: string;
   messages?: OrchestrationMessage[];
+  nodes_executed?: string[];
 }
 interface GatewayResponse {
   outcome?: string;
@@ -81,26 +82,34 @@ export async function POST(request: Request) {
     }
 
     const orch = data?.orchestration;
-    const last =
-      orch?.messages && orch.messages.length > 0
-        ? orch.messages[orch.messages.length - 1]?.content ?? null
-        : null;
+    const messages = orch?.messages ?? [];
 
-    // Accepted but orchestration could not produce a real answer (e.g. the backend
-    // Supervisor is missing its model credential -> status "degraded"). Render the
-    // truthful state instead of a fake reply.
-    if (orch?.status && orch.status !== "success") {
+    // The assistant's actual answer comes from a worker node (e.g. "local_llm").
+    // The supervisor only emits routing traces ("route -> local_llm",
+    // "route -> finish"), so pick the last non-supervisor message with content.
+    const answer =
+      [...messages]
+        .reverse()
+        .find((m) => m.source !== "supervisor" && (m.content ?? "").trim().length > 0)
+        ?.content ?? null;
+
+    if (answer) {
       return NextResponse.json({
         ok: true,
-        text: `⚠️ Gateway reached (intent “${data?.intent}”, outcome “${data?.outcome}”), but orchestration is ${orch.status}${last ? `: ${last}` : ""}.`,
+        text: answer,
         outcome: data?.outcome ?? null,
-        status: orch.status,
+        status: orch?.status ?? null,
+        route: orch?.nodes_executed ?? [],
       });
     }
 
+    // No worker answer (e.g. orchestration "degraded" from a missing credential).
+    // Surface the true state rather than a routing trace or a fake reply.
+    const lastTrace =
+      messages.length > 0 ? messages[messages.length - 1]?.content ?? null : null;
     return NextResponse.json({
-      ok: true,
-      text: last ?? data?.detail ?? "(gateway returned no output)",
+      ok: false,
+      text: `⚠️ Gateway reached (intent “${data?.intent}”, outcome “${data?.outcome}”), but no answer was produced${orch?.status ? ` (orchestration ${orch.status})` : ""}${lastTrace ? `: ${lastTrace}` : ""}.`,
       outcome: data?.outcome ?? null,
       status: orch?.status ?? null,
     });

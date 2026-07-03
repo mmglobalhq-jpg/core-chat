@@ -4,12 +4,14 @@ import { useEffect, useRef } from "react";
 import type { Message as UIMessage } from "ai";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { MessageBubble } from "@/components/chat/MessageBubble";
+import type { RouteMeta } from "@/lib/types";
 
 interface ChatFeedProps {
   messages: UIMessage[];
+  metaById?: Record<string, RouteMeta>;
 }
 
-export function ChatFeed({ messages }: ChatFeedProps) {
+export function ChatFeed({ messages, metaById }: ChatFeedProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   // Keep the latest message in view as new ones arrive (FR-015).
@@ -39,6 +41,7 @@ export function ChatFeed({ messages }: ChatFeedProps) {
                   key={message.id}
                   role={message.role}
                   content={message.content}
+                  meta={metaById?.[message.id]}
                 />
               ) : null,
             )}

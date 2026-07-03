@@ -93,6 +93,8 @@ export interface GatewayReply {
   text: string;
   outcome?: string | null;
   status?: string | null;
+  /** Backend orchestration `nodes_executed` for the routing badge. */
+  route?: string[];
 }
 
 /**
