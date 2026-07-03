@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useChat } from "@ai-sdk/react";
 import type { Message as UIMessage } from "ai";
 import { Sidebar } from "@/components/layout/Sidebar";
@@ -30,6 +30,15 @@ export default function Home() {
 
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  // Tracks the in-flight streamed reply so the input can offer a Stop control
+  // and so we can abort the fetch (and its downstream reader loop) on demand.
+  const [isStreaming, setIsStreaming] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
+
+  const handleStop = useCallback(() => {
+    abortRef.current?.abort();
+  }, []);
 
   // Hydrate the feed from the store whenever the active conversation changes
   // (FR-007 clears, FR-008 loads). Intentionally keyed on the id only so live
@@ -82,18 +91,29 @@ export default function Home() {
         { id: assistantId, role: "assistant", content: "" },
       ]);
 
+      const controller = new AbortController();
+      abortRef.current = controller;
+      setIsStreaming(true);
+
       let streamed = "";
-      sendChat(text, selectedModelId, (token) => {
-        streamed += token;
-        patchContent(streamed);
-      })
+      sendChat(
+        text,
+        selectedModelId,
+        (token) => {
+          streamed += token;
+          patchContent(streamed);
+        },
+        controller.signal,
+      )
         .then((result) => {
-          // No tokens streamed (e.g. a degraded run) -> surface the status
-          // instead of leaving a blank bubble.
+          // No tokens streamed -> surface the status (degraded run) or a stop
+          // notice instead of leaving a blank bubble.
           const content =
             streamed ||
             result.reply ||
-            `⚠️ No reply produced (status: ${result.status}).`;
+            (result.status === "aborted"
+              ? "⏹ Generation stopped."
+              : `⚠️ No reply produced (status: ${result.status}).`);
           patchContent(content);
           appendMessage(conversationId, {
             id: assistantId,
@@ -103,6 +123,19 @@ export default function Home() {
           });
         })
         .catch((err: unknown) => {
+          // A Stop before any response arrives rejects the fetch; that is a
+          // clean cancellation, not a backend error.
+          if (controller.signal.aborted) {
+            const content = streamed || "⏹ Generation stopped.";
+            patchContent(content);
+            appendMessage(conversationId, {
+              id: assistantId,
+              role: "assistant",
+              content,
+              createdAt: Date.now(),
+            });
+            return;
+          }
           const content = `⚠️ Could not reach the backend: ${
             err instanceof Error ? err.message : String(err)
           }`;
@@ -113,6 +146,10 @@ export default function Home() {
             content,
             createdAt: Date.now(),
           });
+        })
+        .finally(() => {
+          if (abortRef.current === controller) abortRef.current = null;
+          setIsStreaming(false);
         });
     },
     [activeConversationId, appendMessage, attachIntent, setMessages, selectedModelId],
@@ -132,8 +169,12 @@ export default function Home() {
           onToggleSidebar={() => setCollapsed((c) => !c)}
         />
         <main className="relative min-h-0 flex-1">
-          <ChatFeed messages={messages} />
-          <ChatInput onSend={handleSend} />
+          <ChatFeed messages={messages} isStreaming={isStreaming} />
+          <ChatInput
+            onSend={handleSend}
+            isStreaming={isStreaming}
+            onStop={handleStop}
+          />
         </main>
       </div>
     </div>

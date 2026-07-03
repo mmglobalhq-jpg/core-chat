@@ -1,7 +1,7 @@
 "use client";
 
 import { useLayoutEffect, useRef, useState } from "react";
-import { ArrowUp, Plus } from "lucide-react";
+import { ArrowUp, Plus, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { canSend } from "@/lib/mock-data";
@@ -9,11 +9,15 @@ import { cn } from "@/lib/utils";
 
 interface ChatInputProps {
   onSend: (text: string) => void;
+  /** True while the assistant is streaming; swaps Send for a Stop control. */
+  isStreaming?: boolean;
+  /** Aborts the in-flight stream (wired to the active AbortController). */
+  onStop?: () => void;
 }
 
 const MAX_TEXTAREA_HEIGHT = 200;
 
-export function ChatInput({ onSend }: ChatInputProps) {
+export function ChatInput({ onSend, isStreaming = false, onStop }: ChatInputProps) {
   const [value, setValue] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const sendable = canSend(value);
@@ -29,7 +33,7 @@ export function ChatInput({ onSend }: ChatInputProps) {
   }, [value]);
 
   function submit() {
-    if (!sendable) return;
+    if (!sendable || isStreaming) return;
     onSend(value.trim());
     setValue("");
   }
@@ -68,16 +72,28 @@ export function ChatInput({ onSend }: ChatInputProps) {
             className="max-h-[200px] min-h-9 flex-1 resize-none border-0 bg-transparent px-1 py-1.5 shadow-none focus-visible:ring-0 dark:bg-transparent"
           />
 
-          <Button
-            type="button"
-            size="icon"
-            onClick={submit}
-            disabled={!sendable}
-            aria-label="Send message"
-            className={cn("size-9 shrink-0 rounded-full")}
-          >
-            <ArrowUp className="size-5" />
-          </Button>
+          {isStreaming ? (
+            <Button
+              type="button"
+              size="icon"
+              onClick={onStop}
+              aria-label="Stop generating"
+              className={cn("size-9 shrink-0 rounded-full")}
+            >
+              <Square className="size-4 fill-current" />
+            </Button>
+          ) : (
+            <Button
+              type="button"
+              size="icon"
+              onClick={submit}
+              disabled={!sendable}
+              aria-label="Send message"
+              className={cn("size-9 shrink-0 rounded-full")}
+            >
+              <ArrowUp className="size-5" />
+            </Button>
+          )}
         </div>
       </div>
     </div>

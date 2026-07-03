@@ -17,11 +17,13 @@ export async function sendChat(
   text: string,
   model?: string,
   onToken?: (token: string) => void,
+  signal?: AbortSignal,
 ): Promise<ChatResult> {
   const res = await fetch("/api/intent", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text, model }),
+    signal,
   });
 
   // A non-stream response is an error envelope (threshold reject, backend down).
@@ -61,18 +63,29 @@ export async function sendChat(
   const decoder = new TextDecoder();
   let buffer = "";
 
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    // SSE events are separated by a blank line ("\n\n").
-    let sep: number;
-    while ((sep = buffer.indexOf("\n\n")) !== -1) {
-      handleEvent(buffer.slice(0, sep));
-      buffer = buffer.slice(sep + 2);
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      // SSE events are separated by a blank line ("\n\n").
+      let sep: number;
+      while ((sep = buffer.indexOf("\n\n")) !== -1) {
+        handleEvent(buffer.slice(0, sep));
+        buffer = buffer.slice(sep + 2);
+      }
     }
+    if (buffer.trim()) handleEvent(buffer); // flush a trailing event, if any
+  } catch (err) {
+    // User pressed Stop: aborting the fetch rejects the pending read(). Cancel
+    // the reader (which drops the proxy->backend stream) and return the partial
+    // reply gathered so far rather than surfacing an error.
+    if (signal?.aborted || (err instanceof DOMException && err.name === "AbortError")) {
+      await reader.cancel().catch(() => {});
+      return { reply, status: "aborted" };
+    }
+    throw err;
   }
-  if (buffer.trim()) handleEvent(buffer); // flush a trailing event, if any
 
   return { reply, status };
 }

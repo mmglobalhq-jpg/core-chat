@@ -7,9 +7,11 @@ import { MessageBubble } from "@/components/chat/MessageBubble";
 
 interface ChatFeedProps {
   messages: UIMessage[];
+  /** True while the newest assistant reply is still streaming in. */
+  isStreaming?: boolean;
 }
 
-export function ChatFeed({ messages }: ChatFeedProps) {
+export function ChatFeed({ messages, isStreaming = false }: ChatFeedProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   // Keep the latest message in view as new ones arrive (FR-015).
@@ -33,12 +35,18 @@ export function ChatFeed({ messages }: ChatFeedProps) {
           </div>
         ) : (
           <div className="flex flex-col gap-6">
-            {messages.map((message) =>
+            {messages.map((message, index) =>
               message.role === "user" || message.role === "assistant" ? (
                 <MessageBubble
                   key={message.id}
                   role={message.role}
                   content={message.content}
+                  loading={
+                    isStreaming &&
+                    index === messages.length - 1 &&
+                    message.role === "assistant" &&
+                    message.content.length === 0
+                  }
                 />
               ) : null,
             )}
