@@ -8,8 +8,9 @@ import { Header } from "@/components/layout/Header";
 import { ChatFeed } from "@/components/chat/ChatFeed";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { useChatStore } from "@/store/useChatStore";
-import { createId, mockReply } from "@/lib/mock-data";
+import { createId } from "@/lib/mock-data";
 import { routeMessage } from "@/lib/router";
+import { sendChat } from "@/lib/api";
 import type { Message } from "@/lib/types";
 
 function toUIMessage(message: Message): UIMessage {
@@ -21,6 +22,7 @@ export default function Home() {
   const conversations = useChatStore((s) => s.conversations);
   const appendMessage = useChatStore((s) => s.appendMessage);
   const attachIntent = useChatStore((s) => s.attachIntent);
+  const selectedModelId = useChatStore((s) => s.selectedModelId);
 
   const { messages, setMessages } = useChat({
     id: activeConversationId ?? "new",
@@ -64,14 +66,56 @@ export default function Home() {
         )
         .catch(() => {});
 
-      const reply = { ...mockReply(text), createdAt: Date.now() };
-      // Small simulated delay so the reply reads as a response, not an echo.
-      window.setTimeout(() => {
-        setMessages((prev) => [...prev, toUIMessage(reply)]);
-        appendMessage(conversationId, reply);
-      }, 350);
+      // Live streamed reply from the backend gateway (via the /api/intent SSE
+      // proxy). Append an empty assistant bubble immediately, then append each
+      // token fragment to that message's content as it arrives. The finished
+      // reply is persisted to the store once the stream completes; a failure
+      // degrades the bubble to an inline error rather than throwing.
+      const assistantId = createId("assistant");
+      const patchContent = (content: string) =>
+        setMessages((prev) =>
+          prev.map((m) => (m.id === assistantId ? { ...m, content } : m)),
+        );
+
+      setMessages((prev) => [
+        ...prev,
+        { id: assistantId, role: "assistant", content: "" },
+      ]);
+
+      let streamed = "";
+      sendChat(text, selectedModelId, (token) => {
+        streamed += token;
+        patchContent(streamed);
+      })
+        .then((result) => {
+          // No tokens streamed (e.g. a degraded run) -> surface the status
+          // instead of leaving a blank bubble.
+          const content =
+            streamed ||
+            result.reply ||
+            `⚠️ No reply produced (status: ${result.status}).`;
+          patchContent(content);
+          appendMessage(conversationId, {
+            id: assistantId,
+            role: "assistant",
+            content,
+            createdAt: Date.now(),
+          });
+        })
+        .catch((err: unknown) => {
+          const content = `⚠️ Could not reach the backend: ${
+            err instanceof Error ? err.message : String(err)
+          }`;
+          patchContent(content);
+          appendMessage(conversationId, {
+            id: assistantId,
+            role: "assistant",
+            content,
+            createdAt: Date.now(),
+          });
+        });
     },
-    [activeConversationId, appendMessage, attachIntent, setMessages],
+    [activeConversationId, appendMessage, attachIntent, setMessages, selectedModelId],
   );
 
   return (
