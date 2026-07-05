@@ -8,6 +8,8 @@
  * Throws with a human-readable message on any failure (non-stream error
  * envelope, threshold rejection, or backend unreachable).
  */
+import { supabase } from "@/lib/supabaseClient";
+
 export interface ChatResult {
   reply: string;
   status: string;
@@ -19,9 +21,21 @@ export async function sendChat(
   onToken?: (token: string) => void,
   signal?: AbortSignal,
 ): Promise<ChatResult> {
+  // Attach the active user's Supabase session JWT so the proxy can forward it as
+  // `Authorization: Bearer <token>` to the backend, which verifies it and resolves
+  // the real user_id. Absent a session the call proceeds unauthenticated (the
+  // backend then treats it as the sandbox user).
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  if (session?.access_token) {
+    headers.Authorization = `Bearer ${session.access_token}`;
+  }
+
   const res = await fetch("/api/intent", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify({ text, model }),
     signal,
   });
