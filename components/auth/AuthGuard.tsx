@@ -1,44 +1,59 @@
 "use client";
 
 /**
- * Client-side auth gate + returning-token interceptor. Wraps the app in the root
- * layout: protected routes require a live Supabase session (anonymous visitors go
- * to /login), while /login and /reset-password are public. It is also the auth
- * listener for returning tokens (parsed from the URL by detectSessionInUrl):
- *   - a normal SIGNED_IN (incl. magic-link) on /login is forwarded to the
- *     dashboard "/";
- *   - a PASSWORD_RECOVERY event is routed to /reset-password so the user can set
- *     a new password before entering the workspace.
- * Guarding here keeps every future route protected by default without a redirect
- * loop on the auth screens.
+ * Client-side auth gate + returning-token interceptor + approval gate. Wraps the
+ * app in the root layout:
+ *   - /login and /reset-password are public.
+ *   - protected routes require a live Supabase session; anonymous -> /login.
+ *   - an authenticated user whose public.profiles.is_approved is false is blocked
+ *     with the PendingApproval card instead of the dashboard.
+ * It is also the returning-token listener: a magic-link SIGNED_IN on /login is
+ * forwarded to "/", and a PASSWORD_RECOVERY event is routed to /reset-password.
  */
 import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
+import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabaseClient";
+import { PendingApproval } from "@/components/auth/PendingApproval";
 
-// Reachable without a session. /reset-password stays public so a recovery session
-// is NOT bounced to the dashboard before the new password is set.
 const PUBLIC_ROUTES = ["/login", "/reset-password"];
 
-type AuthState = "loading" | "authed" | "anon";
+type Access = "loading" | "anon" | "pending" | "approved";
+
+// Resolve the caller's access level: no session -> anon; otherwise read the
+// user's own profile (RLS: profiles_select_own) and gate on is_approved.
+async function resolveAccess(session: Session | null): Promise<Access> {
+  if (!session) return "anon";
+  const { data } = await supabase
+    .from("profiles")
+    .select("is_approved")
+    .eq("id", session.user.id)
+    .maybeSingle();
+  return (data as { is_approved?: boolean } | null)?.is_approved ? "approved" : "pending";
+}
 
 export function AuthGuard({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const [state, setState] = useState<AuthState>("loading");
+  const [state, setState] = useState<Access>("loading");
 
   const isPublic = PUBLIC_ROUTES.includes(pathname);
 
   useEffect(() => {
     let active = true;
-    supabase.auth.getSession().then(({ data }) => {
-      if (active) setState(data.session ? "authed" : "anon");
+    supabase.auth.getSession().then(async ({ data }) => {
+      const next = await resolveAccess(data.session);
+      if (active) setState(next);
     });
-    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+    const { data: sub } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (!active) return;
-      // A returning password-reset token: send the user to set a new password.
-      if (event === "PASSWORD_RECOVERY") router.replace("/reset-password");
-      setState(session ? "authed" : "anon");
+      // Returning password-reset token: go set a new password.
+      if (event === "PASSWORD_RECOVERY") {
+        router.replace("/reset-password");
+        return;
+      }
+      const next = await resolveAccess(session);
+      if (active) setState(next);
     });
     return () => {
       active = false;
@@ -47,19 +62,19 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
   }, [router]);
 
   useEffect(() => {
-    // Anonymous on a protected route -> sign in. Authenticated on /login (e.g. a
-    // returning magic-link session) -> dashboard. /reset-password is intentionally
-    // NOT auto-forwarded, so a recovery session can set its new password there.
+    // Anonymous on a protected route -> sign in. A signed-in user (approved OR
+    // pending) on /login -> dashboard (where a pending user then sees the gate).
     if (state === "anon" && !isPublic) router.replace("/login");
-    if (state === "authed" && pathname === "/login") router.replace("/");
+    if ((state === "approved" || state === "pending") && pathname === "/login") {
+      router.replace("/");
+    }
   }, [state, isPublic, pathname, router]);
 
-  // Public routes render immediately (the login screen must be reachable).
+  // Public routes render immediately (auth screens must be reachable).
   if (isPublic) return <>{children}</>;
 
-  // Protected routes: hold the UI until we know the session, and while a redirect
-  // to /login is in flight, so protected content never flashes for a signed-out user.
-  if (state !== "authed") {
+  // Hold the UI while resolving or redirecting a signed-out user.
+  if (state === "loading" || state === "anon") {
     return (
       <div className="flex h-full w-full items-center justify-center">
         <div
@@ -70,6 +85,9 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
       </div>
     );
   }
+
+  // Signed in but not yet approved -> block the dashboard.
+  if (state === "pending") return <PendingApproval />;
 
   return <>{children}</>;
 }

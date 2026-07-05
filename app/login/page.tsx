@@ -36,6 +36,9 @@ const inputClass =
 export default function LoginPage() {
   const router = useRouter();
   const [view, setView] = useState<View>("signin");
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -66,13 +69,25 @@ export default function LoginPage() {
   const handlePassword = guard(async (e: React.FormEvent) => {
     e.preventDefault();
     if (view === "signup") {
+      // Registration metadata rides in options.data -> auth.users.raw_user_meta_data,
+      // which the handle_new_user() trigger copies into public.profiles.
       const { error } = await supabase.auth.signUp({
         email,
         password,
-        options: { emailRedirectTo: dashboardUrl() },
+        options: {
+          emailRedirectTo: dashboardUrl(),
+          data: {
+            first_name: firstName.trim(),
+            last_name: lastName.trim(),
+            username: username.trim(),
+          },
+        },
       });
       if (error) throw error;
-      setNotice("Account created. Check your email to confirm, then sign in.");
+      setNotice(
+        "Account created. Confirm your email, then your registration goes to an " +
+          "administrator for approval before access is granted.",
+      );
       setView("signin");
     } else {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
@@ -152,6 +167,54 @@ export default function LoginPage() {
           /* --- Sign in / Sign up ---------------------------------------- */
           <>
             <form onSubmit={handlePassword} className="space-y-3">
+              {view === "signup" && (
+                <>
+                  <div className="flex gap-2">
+                    <div className="flex-1 space-y-1">
+                      <label htmlFor="first-name" className={labelClass}>First name</label>
+                      <input
+                        id="first-name"
+                        type="text"
+                        autoComplete="given-name"
+                        required
+                        placeholder="Heath"
+                        value={firstName}
+                        onChange={(e) => setFirstName(e.target.value)}
+                        disabled={busy}
+                        className={inputClass}
+                      />
+                    </div>
+                    <div className="flex-1 space-y-1">
+                      <label htmlFor="last-name" className={labelClass}>Last name</label>
+                      <input
+                        id="last-name"
+                        type="text"
+                        autoComplete="family-name"
+                        required
+                        placeholder="Maxwell"
+                        value={lastName}
+                        onChange={(e) => setLastName(e.target.value)}
+                        disabled={busy}
+                        className={inputClass}
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <label htmlFor="username" className={labelClass}>Username</label>
+                    <input
+                      id="username"
+                      type="text"
+                      autoComplete="username"
+                      required
+                      placeholder="maxha"
+                      value={username}
+                      onChange={(e) => setUsername(e.target.value)}
+                      disabled={busy}
+                      className={inputClass}
+                    />
+                  </div>
+                </>
+              )}
               <div className="space-y-1">
                 <label htmlFor="email" className={labelClass}>Email</label>
                 <input
