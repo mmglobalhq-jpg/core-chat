@@ -1,18 +1,24 @@
 "use client";
 
 /**
- * Client-side auth gate. Wraps the app in the root layout: any route other than
- * the public ones (currently just /login) requires a live Supabase session, and
- * an unauthenticated visitor is redirected to /login. An already-authenticated
- * user who lands on /login is bounced back to the app. Guarding here (rather than
- * per-page) keeps every future route protected by default without a redirect loop
- * on the login screen.
+ * Client-side auth gate + returning-token interceptor. Wraps the app in the root
+ * layout: protected routes require a live Supabase session (anonymous visitors go
+ * to /login), while /login and /reset-password are public. It is also the auth
+ * listener for returning tokens (parsed from the URL by detectSessionInUrl):
+ *   - a normal SIGNED_IN (incl. magic-link) on /login is forwarded to the
+ *     dashboard "/";
+ *   - a PASSWORD_RECOVERY event is routed to /reset-password so the user can set
+ *     a new password before entering the workspace.
+ * Guarding here keeps every future route protected by default without a redirect
+ * loop on the auth screens.
  */
 import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 
-const PUBLIC_ROUTES = ["/login"];
+// Reachable without a session. /reset-password stays public so a recovery session
+// is NOT bounced to the dashboard before the new password is set.
+const PUBLIC_ROUTES = ["/login", "/reset-password"];
 
 type AuthState = "loading" | "authed" | "anon";
 
@@ -28,19 +34,25 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
     supabase.auth.getSession().then(({ data }) => {
       if (active) setState(data.session ? "authed" : "anon");
     });
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+      if (!active) return;
+      // A returning password-reset token: send the user to set a new password.
+      if (event === "PASSWORD_RECOVERY") router.replace("/reset-password");
       setState(session ? "authed" : "anon");
     });
     return () => {
       active = false;
       sub.subscription.unsubscribe();
     };
-  }, []);
+  }, [router]);
 
   useEffect(() => {
+    // Anonymous on a protected route -> sign in. Authenticated on /login (e.g. a
+    // returning magic-link session) -> dashboard. /reset-password is intentionally
+    // NOT auto-forwarded, so a recovery session can set its new password there.
     if (state === "anon" && !isPublic) router.replace("/login");
-    if (state === "authed" && isPublic) router.replace("/");
-  }, [state, isPublic, router]);
+    if (state === "authed" && pathname === "/login") router.replace("/");
+  }, [state, isPublic, pathname, router]);
 
   // Public routes render immediately (the login screen must be reachable).
   if (isPublic) return <>{children}</>;

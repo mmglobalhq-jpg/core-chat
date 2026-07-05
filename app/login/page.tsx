@@ -1,19 +1,33 @@
 "use client";
 
 /**
- * Supabase Auth login screen. Supports email/password (sign in + sign up) and a
- * passwordless magic link. A successful password sign-in fires
- * onAuthStateChange, which the AuthGuard observes to redirect into the app; we
- * also push to "/" explicitly for immediacy. Magic-link sign-in completes when
- * the emailed link returns to the app (detectSessionInUrl in supabaseClient).
+ * Production login view. Three sub-views inside one card (no separate modal):
+ *   - signin: email + password (supabase.auth.signInWithPassword) with a magic
+ *     link alternative (supabase.auth.signInWithOtp) and a "Forgot password?" link.
+ *   - signup: email + password (supabase.auth.signUp).
+ *   - forgot: email only (supabase.auth.resetPasswordForEmail) — sends a recovery
+ *     link (via the project's custom SMTP) that lands on /reset-password.
+ *
+ * Returning tokens (magic-link + recovery hashes) are parsed by the browser
+ * client (detectSessionInUrl) and routed by AuthGuard: a normal sign-in goes to
+ * the dashboard "/", a PASSWORD_RECOVERY event goes to /reset-password.
+ * Styling uses the shared design tokens, so light/dark mode both come for free.
  */
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { ArrowLeft, Loader2, Sparkles } from "lucide-react";
 import { supabase } from "@/lib/supabaseClient";
 import { Button } from "@/components/ui/button";
 
-type Mode = "signin" | "signup";
+type View = "signin" | "signup" | "forgot";
 
+// Where returning auth links land.
+const dashboardUrl = () =>
+  typeof window !== "undefined" ? `${window.location.origin}/` : undefined;
+const resetUrl = () =>
+  typeof window !== "undefined" ? `${window.location.origin}/reset-password` : undefined;
+
+const labelClass = "text-xs font-medium text-muted-foreground";
 const inputClass =
   "h-9 w-full rounded-lg border border-border bg-background px-3 text-sm outline-none " +
   "focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 " +
@@ -21,133 +35,202 @@ const inputClass =
 
 export default function LoginPage() {
   const router = useRouter();
-  const [mode, setMode] = useState<Mode>("signin");
+  const [view, setView] = useState<View>("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  async function handlePasswordSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setBusy(true);
+  function switchTo(next: View) {
+    setView(next);
     setError(null);
     setNotice(null);
-    try {
-      if (mode === "signup") {
-        const { error } = await supabase.auth.signUp({ email, password });
-        if (error) throw error;
-        setNotice("Account created. Check your email to confirm, then sign in.");
-        setMode("signin");
-      } else {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
-        if (error) throw error;
-        router.replace("/");
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Authentication failed.");
-    } finally {
-      setBusy(false);
-    }
   }
 
-  async function handleMagicLink() {
-    if (!email.trim()) {
-      setError("Enter your email first to receive a magic link.");
-      return;
-    }
-    setBusy(true);
-    setError(null);
-    setNotice(null);
-    try {
-      const { error } = await supabase.auth.signInWithOtp({
+  function guard<T extends (...args: never[]) => Promise<void>>(fn: T) {
+    return async (...args: Parameters<T>) => {
+      setBusy(true);
+      setError(null);
+      setNotice(null);
+      try {
+        await fn(...args);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Something went wrong.");
+      } finally {
+        setBusy(false);
+      }
+    };
+  }
+
+  const handlePassword = guard(async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (view === "signup") {
+      const { error } = await supabase.auth.signUp({
         email,
-        options:
-          typeof window !== "undefined"
-            ? { emailRedirectTo: window.location.origin }
-            : undefined,
+        password,
+        options: { emailRedirectTo: dashboardUrl() },
       });
       if (error) throw error;
-      setNotice(`Magic link sent to ${email}. Check your inbox to finish signing in.`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not send the magic link.");
-    } finally {
-      setBusy(false);
+      setNotice("Account created. Check your email to confirm, then sign in.");
+      setView("signin");
+    } else {
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) throw error;
+      router.replace("/");
     }
-  }
+  });
+
+  const handleMagicLink = guard(async () => {
+    if (!email.trim()) throw new Error("Enter your email first to receive a magic link.");
+    const { error } = await supabase.auth.signInWithOtp({
+      email,
+      options: { emailRedirectTo: dashboardUrl() },
+    });
+    if (error) throw error;
+    setNotice(`Magic link sent to ${email}. Check your inbox to finish signing in.`);
+  });
+
+  const handleForgot = guard(async (e: React.FormEvent) => {
+    e.preventDefault();
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: resetUrl(),
+    });
+    if (error) throw error;
+    setNotice(`Password reset link sent to ${email}. Follow it to choose a new password.`);
+  });
 
   return (
     <div className="flex h-full w-full items-center justify-center bg-background p-6">
       <div className="w-full max-w-sm rounded-xl border border-border bg-card p-6 shadow-sm">
-        <div className="mb-6 text-center">
-          <h1 className="text-lg font-semibold">Core Chat</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {mode === "signin" ? "Sign in to continue" : "Create your account"}
-          </p>
+        <div className="mb-6 flex flex-col items-center gap-3 text-center">
+          <span className="inline-flex size-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+            <Sparkles className="size-5" />
+          </span>
+          <div>
+            <h1 className="text-lg font-semibold text-foreground">Core Chat</h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {view === "signin" && "Sign in to continue"}
+              {view === "signup" && "Create your account"}
+              {view === "forgot" && "Reset your password"}
+            </p>
+          </div>
         </div>
 
-        <form onSubmit={handlePasswordSubmit} className="space-y-3">
-          <input
-            type="email"
-            autoComplete="email"
-            required
-            placeholder="you@example.com"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            disabled={busy}
-            className={inputClass}
-          />
-          <input
-            type="password"
-            autoComplete={mode === "signin" ? "current-password" : "new-password"}
-            required
-            minLength={6}
-            placeholder="Password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            disabled={busy}
-            className={inputClass}
-          />
+        {view === "forgot" ? (
+          /* --- Forgot-password sub-view --------------------------------- */
+          <form onSubmit={handleForgot} className="space-y-3">
+            <div className="space-y-1">
+              <label htmlFor="reset-email" className={labelClass}>Email</label>
+              <input
+                id="reset-email"
+                type="email"
+                autoComplete="email"
+                required
+                placeholder="you@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                disabled={busy}
+                className={inputClass}
+              />
+            </div>
+            {error && <p className="text-sm text-destructive">{error}</p>}
+            {notice && <p className="text-sm text-muted-foreground">{notice}</p>}
+            <Button type="submit" size="lg" className="w-full" disabled={busy}>
+              {busy && <Loader2 className="size-4 animate-spin" />}
+              Send reset link
+            </Button>
+            <button
+              type="button"
+              onClick={() => switchTo("signin")}
+              className="mx-auto flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+            >
+              <ArrowLeft className="size-3.5" /> Back to sign in
+            </button>
+          </form>
+        ) : (
+          /* --- Sign in / Sign up ---------------------------------------- */
+          <>
+            <form onSubmit={handlePassword} className="space-y-3">
+              <div className="space-y-1">
+                <label htmlFor="email" className={labelClass}>Email</label>
+                <input
+                  id="email"
+                  type="email"
+                  autoComplete="email"
+                  required
+                  placeholder="you@example.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  disabled={busy}
+                  className={inputClass}
+                />
+              </div>
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <label htmlFor="password" className={labelClass}>Password</label>
+                  {view === "signin" && (
+                    <button
+                      type="button"
+                      onClick={() => switchTo("forgot")}
+                      className="text-xs text-muted-foreground hover:text-foreground"
+                    >
+                      Forgot password?
+                    </button>
+                  )}
+                </div>
+                <input
+                  id="password"
+                  type="password"
+                  autoComplete={view === "signin" ? "current-password" : "new-password"}
+                  required
+                  minLength={6}
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  disabled={busy}
+                  className={inputClass}
+                />
+              </div>
 
-          {error && <p className="text-sm text-destructive">{error}</p>}
-          {notice && <p className="text-sm text-muted-foreground">{notice}</p>}
+              {error && <p className="text-sm text-destructive">{error}</p>}
+              {notice && <p className="text-sm text-muted-foreground">{notice}</p>}
 
-          <Button type="submit" size="lg" className="w-full" disabled={busy}>
-            {mode === "signin" ? "Sign in" : "Sign up"}
-          </Button>
-        </form>
+              <Button type="submit" size="lg" className="w-full" disabled={busy}>
+                {busy && <Loader2 className="size-4 animate-spin" />}
+                {view === "signin" ? "Sign in" : "Sign up"}
+              </Button>
+            </form>
 
-        <div className="my-4 flex items-center gap-3 text-xs text-muted-foreground">
-          <span className="h-px flex-1 bg-border" />
-          or
-          <span className="h-px flex-1 bg-border" />
-        </div>
+            <div className="my-4 flex items-center gap-3 text-xs text-muted-foreground">
+              <span className="h-px flex-1 bg-border" />
+              or
+              <span className="h-px flex-1 bg-border" />
+            </div>
 
-        <Button
-          type="button"
-          variant="outline"
-          size="lg"
-          className="w-full"
-          disabled={busy}
-          onClick={handleMagicLink}
-        >
-          Email me a magic link
-        </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="lg"
+              className="w-full"
+              disabled={busy}
+              onClick={handleMagicLink}
+            >
+              Email me a magic link
+            </Button>
 
-        <p className="mt-6 text-center text-sm text-muted-foreground">
-          {mode === "signin" ? "No account yet?" : "Already have an account?"}{" "}
-          <button
-            type="button"
-            className="font-medium text-foreground underline underline-offset-4"
-            onClick={() => {
-              setMode(mode === "signin" ? "signup" : "signin");
-              setError(null);
-              setNotice(null);
-            }}
-          >
-            {mode === "signin" ? "Sign up" : "Sign in"}
-          </button>
-        </p>
+            <p className="mt-6 text-center text-sm text-muted-foreground">
+              {view === "signin" ? "No account yet?" : "Already have an account?"}{" "}
+              <button
+                type="button"
+                className="font-medium text-foreground underline underline-offset-4"
+                onClick={() => switchTo(view === "signin" ? "signup" : "signin")}
+              >
+                {view === "signin" ? "Sign up" : "Sign in"}
+              </button>
+            </p>
+          </>
+        )}
       </div>
     </div>
   );
