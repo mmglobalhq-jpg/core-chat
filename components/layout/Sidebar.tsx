@@ -1,6 +1,7 @@
 "use client";
 
-import { PanelLeftClose, Plus, Settings } from "lucide-react";
+import Link from "next/link";
+import { PanelLeftClose, Plus, Settings, ShieldCheck } from "lucide-react";
 import {
   Sheet,
   SheetContent,
@@ -11,6 +12,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import { useChatStore } from "@/store/useChatStore";
+import { useIsAdmin } from "@/lib/useIsAdmin";
 import { cn } from "@/lib/utils";
 
 interface SidebarProps {
@@ -70,6 +72,7 @@ function SidebarBody({
   const activeConversationId = useChatStore((s) => s.activeConversationId);
   const newConversation = useChatStore((s) => s.newConversation);
   const selectConversation = useChatStore((s) => s.selectConversation);
+  const isAdmin = useIsAdmin();
 
   // Only show conversations that have messages — a brand-new empty chat isn't
   // listed in history until the user sends something (mirrors Gemini).
@@ -136,6 +139,19 @@ function SidebarBody({
       {/* Bottom: settings + theme toggle pinned (FR-004, FR-020). */}
       <div className="mt-auto border-t border-sidebar-border p-2">
         <ThemeToggle />
+        {/* Admin panel — only for is_admin users (UX gate; routes enforce it too). */}
+        {isAdmin && (
+          <Button
+            asChild
+            variant="ghost"
+            className="w-full justify-start gap-2 text-sidebar-foreground"
+          >
+            <Link href="/settings/admin">
+              <ShieldCheck className="size-4" />
+              <span className="text-sm">Admin</span>
+            </Link>
+          </Button>
+        )}
         <Button
           type="button"
           variant="ghost"
