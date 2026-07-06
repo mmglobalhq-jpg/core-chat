@@ -11,7 +11,7 @@ import { ADMIN_EMAIL } from "@/lib/constants";
 
 export { ADMIN_EMAIL };
 
-type Gate = { user: User } | { error: NextResponse };
+type Gate = { user: User; token: string } | { error: NextResponse };
 
 export async function requireAdmin(request: Request): Promise<Gate> {
   const header = request.headers.get("authorization") ?? "";
@@ -26,5 +26,5 @@ export async function requireAdmin(request: Request): Promise<Gate> {
   if ((data.user.email ?? "").toLowerCase() !== ADMIN_EMAIL) {
     return { error: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
   }
-  return { user: data.user };
+  return { user: data.user, token };
 }

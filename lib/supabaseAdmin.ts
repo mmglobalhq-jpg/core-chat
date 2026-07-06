@@ -19,3 +19,20 @@ export function getSupabaseAdmin(): SupabaseClient {
   });
   return client;
 }
+
+/**
+ * A per-request client scoped to a user's access token, so RLS runs as THAT user.
+ * Used to list profiles as the admin (RLS profiles_select_admin grants read-all) —
+ * reads go through RLS/least-privilege instead of relying on service_role.
+ */
+export function getSupabaseAsUser(token: string): SupabaseClient {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !anon) {
+    throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY");
+  }
+  return createClient(url, anon, {
+    global: { headers: { Authorization: `Bearer ${token}` } },
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+}

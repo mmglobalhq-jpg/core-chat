@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { PanelLeftClose, Plus, ShieldCheck } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { LogOut, PanelLeftClose, Plus, ShieldCheck } from "lucide-react";
 import {
   Sheet,
   SheetContent,
@@ -12,6 +13,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import { SettingsModal } from "@/components/settings/SettingsModal";
+import { supabase } from "@/lib/supabaseClient";
 import { useChatStore } from "@/store/useChatStore";
 import { useIsAdmin } from "@/lib/useIsAdmin";
 import { cn } from "@/lib/utils";
@@ -74,6 +76,12 @@ function SidebarBody({
   const newConversation = useChatStore((s) => s.newConversation);
   const selectConversation = useChatStore((s) => s.selectConversation);
   const isAdmin = useIsAdmin();
+  const router = useRouter();
+
+  async function handleSignOut() {
+    await supabase.auth.signOut();
+    router.replace("/login"); // AuthGuard also reacts to SIGNED_OUT; this is immediate.
+  }
 
   // Only show conversations that have messages — a brand-new empty chat isn't
   // listed in history until the user sends something (mirrors Gemini).
@@ -154,6 +162,15 @@ function SidebarBody({
           </Button>
         )}
         <SettingsModal />
+        <Button
+          type="button"
+          variant="ghost"
+          className="w-full justify-start gap-2 text-sidebar-foreground"
+          onClick={handleSignOut}
+        >
+          <LogOut className="size-4" />
+          <span className="text-sm">Sign out</span>
+        </Button>
       </div>
     </div>
   );
