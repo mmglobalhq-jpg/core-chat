@@ -8,7 +8,7 @@
  * admin-only /settings/admin page.
  */
 import { useEffect, useState } from "react";
-import { Check, Loader2, Settings, SlidersHorizontal, User } from "lucide-react";
+import { Check, ExternalLink, Loader2, Monitor, Settings, SlidersHorizontal, User } from "lucide-react";
 import { useTheme } from "next-themes";
 import {
   Sheet,
@@ -19,12 +19,14 @@ import {
 } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { useProfile } from "@/lib/useProfile";
+import { useIsAdmin } from "@/lib/useIsAdmin";
 import { cn } from "@/lib/utils";
 
-type Tab = "profile" | "preferences";
+type Tab = "profile" | "preferences" | "desktop";
 
 export function SettingsModal() {
   const [tab, setTab] = useState<Tab>("profile");
+  const isAdmin = useIsAdmin();
 
   return (
     <Sheet>
@@ -50,9 +52,23 @@ export function SettingsModal() {
           <TabButton active={tab === "preferences"} onClick={() => setTab("preferences")} icon={<SlidersHorizontal className="size-4" />}>
             Preferences
           </TabButton>
+          {/* Admin-only Desktop tab. */}
+          {isAdmin && (
+            <TabButton active={tab === "desktop"} onClick={() => setTab("desktop")} icon={<Monitor className="size-4" />}>
+              Desktop
+            </TabButton>
+          )}
         </div>
 
-        <div className="p-4">{tab === "profile" ? <ProfileTab /> : <PreferencesTab />}</div>
+        <div className="p-4">
+          {tab === "preferences" ? (
+            <PreferencesTab />
+          ) : tab === "desktop" && isAdmin ? (
+            <DesktopTab />
+          ) : (
+            <ProfileTab />
+          )}
+        </div>
       </SheetContent>
     </Sheet>
   );
@@ -157,6 +173,33 @@ function PreferencesTab() {
           );
         })}
       </div>
+    </div>
+  );
+}
+
+function DesktopTab() {
+  return (
+    <div role="tabpanel" aria-label="Desktop" className="space-y-4">
+      <div className="flex flex-col items-center gap-3 rounded-xl border border-border bg-muted/30 p-6 text-center">
+        <span className="inline-flex size-12 items-center justify-center rounded-full bg-primary/10 text-primary">
+          <Monitor className="size-6" />
+        </span>
+        <div>
+          <p className="text-sm font-medium text-foreground">Remote Desktop Portal</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Opens the Guacamole desktop gateway in a new tab, behind Cloudflare Access.
+          </p>
+        </div>
+        <Button asChild size="lg">
+          <a href="https://desktop.mmglobal.us" target="_blank" rel="noreferrer">
+            <ExternalLink className="size-4" />
+            Launch Remote Desktop Portal
+          </a>
+        </Button>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        You&rsquo;ll authenticate through Cloudflare Access before the desktop loads. Admin-only.
+      </p>
     </div>
   );
 }
