@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { PanelLeftClose, Plus, Settings, ShieldCheck } from "lucide-react";
+import { PanelLeftClose, Plus, ShieldCheck } from "lucide-react";
 import {
   Sheet,
   SheetContent,
@@ -11,6 +11,7 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
+import { SettingsModal } from "@/components/settings/SettingsModal";
 import { useChatStore } from "@/store/useChatStore";
 import { useIsAdmin } from "@/lib/useIsAdmin";
 import { cn } from "@/lib/utils";
@@ -152,14 +153,7 @@ function SidebarBody({
             </Link>
           </Button>
         )}
-        <Button
-          type="button"
-          variant="ghost"
-          className="w-full justify-start gap-2 text-sidebar-foreground"
-        >
-          <Settings className="size-4" />
-          <span className="text-sm">Settings</span>
-        </Button>
+        <SettingsModal />
       </div>
     </div>
   );
