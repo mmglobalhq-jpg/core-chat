@@ -120,7 +120,7 @@ function SidebarBody({
 
       {/* Middle: scrollable history (FR-004). */}
       <ScrollArea className="min-h-0 flex-1 px-2">
-        <div className="flex flex-col gap-0.5 py-1">
+        <div className="flex w-full min-w-0 flex-col gap-0.5 py-1">
           <p className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
             Recent
           </p>
@@ -132,7 +132,7 @@ function SidebarBody({
             history.map((conversation) => {
               const active = conversation.id === activeConversationId;
               return (
-                <div key={conversation.id} className="group relative">
+                <div key={conversation.id} className="group relative w-full min-w-0">
                   <button
                     type="button"
                     onClick={() => selectConversation(conversation.id)}
@@ -159,7 +159,10 @@ function SidebarBody({
                     aria-label={`Remove from Recent: ${conversation.title}`}
                     title="Remove from Recent"
                     className={cn(
-                      "absolute right-1 top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:opacity-100 group-hover:opacity-100",
+                      // Always visible (subtle), brighter on hover/focus — chosen for
+                      // discoverability; identical on mouse and touch. (Row clipping
+                      // that hid this entirely is fixed in ScrollArea.)
+                      "absolute right-1 top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground opacity-70 transition-opacity hover:bg-sidebar-accent hover:text-sidebar-foreground hover:opacity-100 focus-visible:opacity-100",
                     )}
                   >
                     <X className="size-4" />
