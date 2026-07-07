@@ -10,7 +10,6 @@ import { ChatInput } from "@/components/chat/ChatInput";
 import { useChatStore, shouldAutoTitle } from "@/store/useChatStore";
 import { useChatSync } from "@/lib/useChatSync";
 import { createId } from "@/lib/mock-data";
-import { routeMessage } from "@/lib/router";
 import { sendChat, generateTitle } from "@/lib/api";
 import type { Message } from "@/lib/types";
 
@@ -40,7 +39,6 @@ export default function Home() {
   const activeConversationId = useChatStore((s) => s.activeConversationId);
   const conversations = useChatStore((s) => s.conversations);
   const appendMessage = useChatStore((s) => s.appendMessage);
-  const attachIntent = useChatStore((s) => s.attachIntent);
   const selectedModelId = useChatStore((s) => s.selectedModelId);
 
   // Load this user's persisted chats on mount + on sign-in/out (per-user history).
@@ -104,15 +102,6 @@ export default function Home() {
       };
       setMessages((prev) => [...prev, toUIMessage(userMessage)]);
       appendMessage(conversationId, userMessage);
-
-      // Non-blocking intent routing (FR-026 / SC-008): fire-and-forget, attach
-      // the payload when it resolves; a failure is inert (FR-028). Nothing here
-      // is awaited, so the message + reply flow are never delayed by routing.
-      routeMessage(text)
-        .then((payload) =>
-          attachIntent(conversationId, userMessage.id, payload),
-        )
-        .catch(() => {});
 
       // Live streamed reply from the backend gateway (via the /api/intent SSE
       // proxy). Append an empty assistant bubble immediately, then append each
@@ -193,7 +182,7 @@ export default function Home() {
           setIsStreaming(false);
         });
     },
-    [activeConversationId, appendMessage, attachIntent, setMessages, selectedModelId],
+    [activeConversationId, appendMessage, setMessages, selectedModelId],
   );
 
   return (

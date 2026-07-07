@@ -1,11 +1,19 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   useChatStore,
   shouldAutoTitle,
   deriveTitle,
 } from "@/store/useChatStore";
 import { seedConversations } from "@/lib/mock-data";
+import { loadMessages } from "@/lib/chatHistory";
 import type { Conversation, Message, Role } from "@/lib/types";
+
+// Keep chatHistory real (its fns short-circuit with no session) but make
+// loadMessages controllable so we can reproduce the lazy-load race in C-1.
+vi.mock("@/lib/chatHistory", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/chatHistory")>()),
+  loadMessages: vi.fn(async () => [] as Message[]),
+}));
 
 // Snapshot the store's true initial state at import time, before beforeEach
 // mutates it. Zustand replaces the state object on setState, so this reference
@@ -37,6 +45,48 @@ beforeEach(() => {
     selectedModelId: "gemini-2.5-flash",
     conversations: seeded,
     activeConversationId: seeded[0].id,
+  });
+});
+
+describe("selectConversation lazy-load reconciliation (C-1)", () => {
+  it("does not clobber a turn appended while the DB load is in flight", async () => {
+    let resolveLoad!: (m: Message[]) => void;
+    (loadMessages as ReturnType<typeof vi.fn>).mockImplementationOnce(
+      () => new Promise<Message[]>((res) => (resolveLoad = res)),
+    );
+    const persisted: Conversation = {
+      id: "persisted-1",
+      title: "Old chat",
+      messages: [],
+      updatedAt: 0,
+      persisted: true,
+      loaded: false,
+    };
+    useChatStore.setState({
+      conversations: [persisted],
+      activeConversationId: "persisted-1",
+    });
+
+    useChatStore.getState().selectConversation("persisted-1"); // kicks off load
+    // user sends before the load resolves
+    useChatStore.getState().appendMessage("persisted-1", {
+      id: "new-1",
+      role: "user",
+      content: "hi",
+      createdAt: 1,
+    });
+    // DB load now resolves with the prior history
+    resolveLoad([{ id: "db-1", role: "user", content: "old", createdAt: 0 }]);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const conv = useChatStore
+      .getState()
+      .conversations.find((c) => c.id === "persisted-1")!;
+    const contents = conv.messages.map((m) => m.content);
+    expect(contents).toContain("hi"); // appended turn survived (not clobbered)
+    expect(contents).toContain("old"); // db history present
+    expect(conv.loaded).toBe(true);
   });
 });
 
@@ -190,42 +240,3 @@ describe("appendMessage (FR-013/FR-014)", () => {
   });
 });
 
-describe("attachIntent (FR-024, FR-028)", () => {
-  const payload = {
-    primary_action: "question",
-    requires_tools: false,
-    entities: ["France"],
-    model_tier: "flash" as const,
-  };
-
-  it("attaches the payload to the correct message", () => {
-    const convId = useChatStore.getState().conversations[0].id;
-    useChatStore.getState().appendMessage(convId, {
-      id: "m-intent",
-      role: "user",
-      content: "What is the capital of France?",
-      createdAt: 1,
-    });
-
-    useChatStore.getState().attachIntent(convId, "m-intent", payload);
-
-    const msg = useChatStore
-      .getState()
-      .conversations.find((c) => c.id === convId)
-      ?.messages.find((m) => m.id === "m-intent");
-    expect(msg?.intent).toEqual(payload);
-  });
-
-  it("is a no-op for an unknown conversation id", () => {
-    const before = useChatStore.getState().conversations;
-    useChatStore.getState().attachIntent("nope", "m-intent", payload);
-    expect(useChatStore.getState().conversations).toEqual(before);
-  });
-
-  it("is a no-op for an unknown message id (does not throw)", () => {
-    const convId = useChatStore.getState().conversations[0].id;
-    expect(() =>
-      useChatStore.getState().attachIntent(convId, "does-not-exist", payload),
-    ).not.toThrow();
-  });
-});
