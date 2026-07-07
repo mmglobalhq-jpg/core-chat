@@ -34,6 +34,9 @@ services:
       GUACD_HOSTNAME: guacd
       GUACD_PORT: "4822"
       GUACAMOLE_HOME: /etc/guacamole
+      # Deploy the webapp as ROOT.war so it serves at / instead of /guacamole/.
+      # desktop.mmglobal.us hits the bare domain; without this Tomcat 404s at root.
+      WEBAPP_CONTEXT: ROOT
     volumes:
       # Rendered config: user-mapping.xml (secrets, gitignored) + guacamole.properties.
       - ./guacamole-home:/etc/guacamole:ro
