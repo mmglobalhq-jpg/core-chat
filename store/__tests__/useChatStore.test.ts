@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { useChatStore } from "@/store/useChatStore";
+import {
+  useChatStore,
+  shouldAutoTitle,
+  deriveTitle,
+} from "@/store/useChatStore";
 import { seedConversations } from "@/lib/mock-data";
+import type { Conversation, Message, Role } from "@/lib/types";
 
 // Snapshot the store's true initial state at import time, before beforeEach
 // mutates it. Zustand replaces the state object on setState, so this reference
@@ -84,6 +89,73 @@ describe("deleteConversation", () => {
     const head = after.conversations[0];
     expect(head.id).toBe(after.activeConversationId);
     expect(head.messages).toEqual([]);
+  });
+});
+
+describe("shouldAutoTitle (fire once at the 2nd exchange)", () => {
+  const m = (role: Role, content: string): Message => ({
+    id: `${role}-${content}`,
+    role,
+    content,
+    createdAt: 0,
+  });
+  const conv = (messages: Message[], extra: Partial<Conversation> = {}): Conversation => {
+    const firstUser = messages.find((x) => x.role === "user");
+    return {
+      id: "c",
+      title: deriveTitle(firstUser?.content ?? "New chat"),
+      messages,
+      updatedAt: 0,
+      ...extra,
+    };
+  };
+  const two = [
+    m("user", "Museums in DC?"),
+    m("assistant", "The Smithsonian is great."),
+    m("user", "Which is best?"),
+    m("assistant", "Air and Space."),
+  ];
+
+  it("fires at exactly two completed assistant replies", () => {
+    expect(shouldAutoTitle(conv(two))).toBe(true);
+  });
+
+  it("does not fire after only one exchange", () => {
+    expect(shouldAutoTitle(conv(two.slice(0, 2)))).toBe(false);
+  });
+
+  it("does not fire after three exchanges", () => {
+    expect(
+      shouldAutoTitle(conv([...two, m("user", "more"), m("assistant", "sure")])),
+    ).toBe(false);
+  });
+
+  it("does not fire when already titled", () => {
+    expect(shouldAutoTitle(conv(two, { titled: true }))).toBe(false);
+  });
+
+  it("does not fire when the title was already changed off the auto default", () => {
+    expect(shouldAutoTitle(conv(two, { title: "Custom Title" }))).toBe(false);
+  });
+
+  it("ignores empty assistant replies when counting", () => {
+    const withEmpty = [
+      m("user", "Museums in DC?"),
+      m("assistant", ""),
+      m("user", "Which is best?"),
+      m("assistant", "Air and Space."),
+    ];
+    expect(shouldAutoTitle(conv(withEmpty))).toBe(false); // only 1 real reply
+  });
+});
+
+describe("setConversationTitle", () => {
+  it("updates the title and flags it titled", () => {
+    const id = useChatStore.getState().conversations[0].id;
+    useChatStore.getState().setConversationTitle(id, "DC Museums");
+    const c = useChatStore.getState().conversations.find((x) => x.id === id);
+    expect(c?.title).toBe("DC Museums");
+    expect(c?.titled).toBe(true);
   });
 });
 

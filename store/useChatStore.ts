@@ -7,6 +7,7 @@ import {
   insertMessage,
   listChats,
   loadMessages,
+  renameChat,
 } from "@/lib/chatHistory";
 
 interface ChatStore {
@@ -22,6 +23,8 @@ interface ChatStore {
   selectConversation: (id: string) => void;
   appendMessage: (conversationId: string, message: Message) => void;
   deleteConversation: (id: string) => void;
+  /** Apply an (LLM-generated) title: update state, flag titled, persist via RLS. */
+  setConversationTitle: (id: string, title: string) => void;
 
   /** Load the signed-in user's chats from Supabase (call on mount / user change). */
   hydrateForUser: () => Promise<void>;
@@ -148,6 +151,15 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     if (conv) persistTurn(conversationId, conv.title, message);
   },
 
+  setConversationTitle: (id, title) => {
+    set((state) => ({
+      conversations: state.conversations.map((c) =>
+        c.id === id ? { ...c, title, titled: true } : c,
+      ),
+    }));
+    void renameChat(id, title); // best-effort persist (RLS-scoped)
+  },
+
   deleteConversation: (id) => {
     void deleteChat(id); // best-effort; messages cascade via FK. RLS-scoped.
     ensured.delete(id);
@@ -223,8 +235,26 @@ if (process.env.NODE_ENV !== "production" && typeof window !== "undefined") {
     useChatStore;
 }
 
-function deriveTitle(content: string): string {
+export function deriveTitle(content: string): string {
   const trimmed = content.trim();
   if (trimmed.length === 0) return "New chat";
   return trimmed.length > 40 ? `${trimmed.slice(0, 40)}…` : trimmed;
+}
+
+/**
+ * Whether a conversation is due for an LLM-generated title: exactly two completed
+ * assistant replies (the 2nd exchange), not already titled, and the title is still
+ * the auto default (the blank "New chat" or the first-message-derived stand-in) —
+ * so a title the user/LLM already set is never overwritten. Pure + exported so the
+ * page trigger stays testable.
+ */
+export function shouldAutoTitle(conversation: Conversation): boolean {
+  if (conversation.titled) return false;
+  const assistantReplies = conversation.messages.filter(
+    (m) => m.role === "assistant" && m.content.trim().length > 0,
+  ).length;
+  if (assistantReplies !== 2) return false; // fire once, at the 2nd exchange
+  const firstUser = conversation.messages.find((m) => m.role === "user");
+  const autoTitle = firstUser ? deriveTitle(firstUser.content) : "New chat";
+  return conversation.title === "New chat" || conversation.title === autoTitle;
 }

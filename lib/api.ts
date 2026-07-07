@@ -15,6 +15,34 @@ export interface ChatResult {
   status: string;
 }
 
+/**
+ * Ask the backend (local model) for a short title summarizing a conversation.
+ * Best-effort: returns null on any failure so the caller keeps its current title.
+ * Forwards the Supabase session JWT so the same-origin proxy can clear the edge.
+ */
+export async function generateTitle(
+  messages: { role: string; content: string }[],
+): Promise<string | null> {
+  try {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (session?.access_token) headers.Authorization = `Bearer ${session.access_token}`;
+
+    const res = await fetch("/api/title", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ messages }),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json().catch(() => ({}))) as { title?: unknown };
+    return typeof data.title === "string" && data.title.trim() ? data.title : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function sendChat(
   text: string,
   model?: string,

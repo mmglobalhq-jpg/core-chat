@@ -7,12 +7,30 @@ import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { ChatFeed } from "@/components/chat/ChatFeed";
 import { ChatInput } from "@/components/chat/ChatInput";
-import { useChatStore } from "@/store/useChatStore";
+import { useChatStore, shouldAutoTitle } from "@/store/useChatStore";
 import { useChatSync } from "@/lib/useChatSync";
 import { createId } from "@/lib/mock-data";
 import { routeMessage } from "@/lib/router";
-import { sendChat } from "@/lib/api";
+import { sendChat, generateTitle } from "@/lib/api";
 import type { Message } from "@/lib/types";
+
+/**
+ * After a reply lands, if the conversation just hit its 2nd exchange, ask the
+ * backend (local model) for a topic title and apply it. Fire-and-forget and
+ * best-effort — reads the latest store state and no-ops on any failure.
+ */
+function maybeAutoTitle(conversationId: string) {
+  const store = useChatStore.getState();
+  const conversation = store.conversations.find((c) => c.id === conversationId);
+  if (!conversation || !shouldAutoTitle(conversation)) return;
+  const turns = conversation.messages.map((m) => ({
+    role: m.role,
+    content: m.content,
+  }));
+  void generateTitle(turns).then((title) => {
+    if (title) useChatStore.getState().setConversationTitle(conversationId, title);
+  });
+}
 
 function toUIMessage(message: Message): UIMessage {
   return { id: message.id, role: message.role, content: message.content };
@@ -143,6 +161,7 @@ export default function Home() {
             content,
             createdAt: Date.now(),
           });
+          maybeAutoTitle(conversationId);
         })
         .catch((err: unknown) => {
           // A Stop before any response arrives rejects the fetch; that is a

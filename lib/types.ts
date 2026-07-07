@@ -44,6 +44,11 @@ export interface Conversation {
    * lazily filled on first select. Client-only.
    */
   loaded?: boolean;
+  /**
+   * True once an LLM-generated title has been applied (after the 2nd exchange),
+   * so it fires at most once and never overwrites a set title. Client-only.
+   */
+  titled?: boolean;
 }
 
 /** A `public.chats` row as selected from Supabase (metadata only, no messages). */
