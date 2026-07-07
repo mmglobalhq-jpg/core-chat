@@ -1,0 +1,52 @@
+# Apache Guacamole desktop gateway — SCAFFOLD ONLY (NOT part of the live stack).
+#
+# Nothing here runs until you explicitly bring it up, and it never touches the
+# active core-* / cloudflared stack or the public tunnel.
+#
+# Prereqs (in the master /home/mmglobal/projects/.env):
+#   RDP_HOST, RDP_USERNAME, RDP_PASSWORD   -> the target desktop (RDP)
+#   GUAC_ADMIN_PASSWORD                    -> the Guacamole UI login password
+# plus a reachable RDP/VNC server at RDP_HOST.
+#
+# Bring it up (localhost-only; see README.md for the full flow + tunnel wiring):
+#   set -a; . /home/mmglobal/projects/.env; set +a
+#   ./render-config.sh
+#   docker compose -f docker-compose.guacamole.yml up -d
+#
+# Secrets stay OUT of source: connection params reference env-rendered
+# guacamole-home/user-mapping.xml (gitignored); this file holds no secrets.
+
+services:
+  guacd:
+    image: guacamole/guacd:1.5.5
+    container_name: guacd
+    restart: unless-stopped
+    networks:
+      - guac-net
+
+  guacamole:
+    image: guacamole/guacamole:1.5.5
+    container_name: guacamole
+    restart: unless-stopped
+    depends_on:
+      - guacd
+    environment:
+      GUACD_HOSTNAME: guacd
+      GUACD_PORT: "4822"
+      GUACAMOLE_HOME: /etc/guacamole
+      # Deploy the webapp as ROOT.war so it serves at / instead of /guacamole/.
+      # desktop.mmglobal.us hits the bare domain; without this Tomcat 404s at root.
+      WEBAPP_CONTEXT: ROOT
+    volumes:
+      # Rendered config: user-mapping.xml (secrets, gitignored) + guacamole.properties.
+      - ./guacamole-home:/etc/guacamole:ro
+    ports:
+      # Internal bind ONLY — never 0.0.0.0. Public access is via the Cloudflare
+      # Tunnel + Access (see README), configured separately when going live.
+      - "127.0.0.1:8080:8080"
+    networks:
+      - guac-net
+
+networks:
+  guac-net:
+    driver: bridge

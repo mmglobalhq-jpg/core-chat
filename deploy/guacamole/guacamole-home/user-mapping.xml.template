@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  TEMPLATE — parameterized; render with ./render-config.sh (envsubst) into
+  user-mapping.xml (gitignored). Do NOT put real secrets here.
+
+  Values are injected from the master .env:
+    ${GUAC_ADMIN_PASSWORD}  Guacamole UI login password (2nd factor behind Access)
+    ${RDP_HOST} ${RDP_PORT} ${RDP_USERNAME} ${RDP_PASSWORD}  the target desktop
+-->
+<user-mapping>
+    <authorize username="admin" password="${GUAC_ADMIN_PASSWORD}">
+        <connection name="Primary Desktop (RDP)">
+            <protocol>rdp</protocol>
+            <param name="hostname">${RDP_HOST}</param>
+            <param name="port">${RDP_PORT}</param>
+            <param name="username">${RDP_USERNAME}</param>
+            <param name="password">${RDP_PASSWORD}</param>
+            <param name="ignore-cert">true</param>
+            <param name="resize-method">display-update</param>
+        </connection>
+    </authorize>
+</user-mapping>

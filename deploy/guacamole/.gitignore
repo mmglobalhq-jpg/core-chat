@@ -1,0 +1,2 @@
+# Rendered config holds real RDP + Guacamole UI passwords — never commit it.
+guacamole-home/user-mapping.xml

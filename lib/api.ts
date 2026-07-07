@@ -8,9 +8,39 @@
  * Throws with a human-readable message on any failure (non-stream error
  * envelope, threshold rejection, or backend unreachable).
  */
+import { supabase } from "@/lib/supabaseClient";
+
 export interface ChatResult {
   reply: string;
   status: string;
+}
+
+/**
+ * Ask the backend (local model) for a short title summarizing a conversation.
+ * Best-effort: returns null on any failure so the caller keeps its current title.
+ * Forwards the Supabase session JWT so the same-origin proxy can clear the edge.
+ */
+export async function generateTitle(
+  messages: { role: string; content: string }[],
+): Promise<string | null> {
+  try {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (session?.access_token) headers.Authorization = `Bearer ${session.access_token}`;
+
+    const res = await fetch("/api/title", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ messages }),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json().catch(() => ({}))) as { title?: unknown };
+    return typeof data.title === "string" && data.title.trim() ? data.title : null;
+  } catch {
+    return null;
+  }
 }
 
 export async function sendChat(
@@ -18,11 +48,26 @@ export async function sendChat(
   model?: string,
   onToken?: (token: string) => void,
   signal?: AbortSignal,
+  history?: { role: string; content: string }[],
 ): Promise<ChatResult> {
+  // Attach the active user's Supabase session JWT so the proxy can forward it as
+  // `Authorization: Bearer <token>` to the backend, which verifies it and resolves
+  // the real user_id. Absent a session the call proceeds unauthenticated (the
+  // backend then treats it as the sandbox user).
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  if (session?.access_token) {
+    headers.Authorization = `Bearer ${session.access_token}`;
+  }
+
   const res = await fetch("/api/intent", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text, model }),
+    headers,
+    // `history` carries prior conversation turns so the backend can seed the
+    // agent with context (see /api/intent proxy + IntentPayload.history).
+    body: JSON.stringify({ text, model, history }),
     signal,
   });
 

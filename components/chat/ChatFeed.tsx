@@ -44,8 +44,7 @@ export function ChatFeed({ messages, isStreaming = false }: ChatFeedProps) {
                   loading={
                     isStreaming &&
                     index === messages.length - 1 &&
-                    message.role === "assistant" &&
-                    message.content.length === 0
+                    message.role === "assistant"
                   }
                 />
               ) : null,

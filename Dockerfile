@@ -26,6 +26,15 @@ RUN apk add --no-cache libc6-compat \
 ENV NEXT_TELEMETRY_DISABLED=1
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+
+# Accept Supabase credentials as build arguments from Docker Compose
+ARG NEXT_PUBLIC_SUPABASE_URL
+ARG NEXT_PUBLIC_SUPABASE_ANON_KEY
+
+# Expose them to Next.js during the static prerender/compilation phase
+ENV NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL
+ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=$NEXT_PUBLIC_SUPABASE_ANON_KEY
+
 RUN pnpm run build
 
 # --- runner: lean runtime that serves the build -------------------------------

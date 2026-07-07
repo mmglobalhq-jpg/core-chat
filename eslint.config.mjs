@@ -18,7 +18,8 @@ const eslintConfig = [
     },
   },
   {
-    ignores: [".next/**", "out/**", "build/**", "next-env.d.ts"],
+    // supabase/ holds Deno edge functions + SQL — not part of the Next app.
+    ignores: [".next/**", "out/**", "build/**", "next-env.d.ts", "supabase/**"],
   },
 ];
 

@@ -7,11 +7,30 @@ import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { ChatFeed } from "@/components/chat/ChatFeed";
 import { ChatInput } from "@/components/chat/ChatInput";
-import { useChatStore } from "@/store/useChatStore";
+import { useChatStore, shouldAutoTitle } from "@/store/useChatStore";
+import { useChatSync } from "@/lib/useChatSync";
 import { createId } from "@/lib/mock-data";
 import { routeMessage } from "@/lib/router";
-import { sendChat } from "@/lib/api";
+import { sendChat, generateTitle } from "@/lib/api";
 import type { Message } from "@/lib/types";
+
+/**
+ * After a reply lands, if the conversation just hit its 2nd exchange, ask the
+ * backend (local model) for a topic title and apply it. Fire-and-forget and
+ * best-effort — reads the latest store state and no-ops on any failure.
+ */
+function maybeAutoTitle(conversationId: string) {
+  const store = useChatStore.getState();
+  const conversation = store.conversations.find((c) => c.id === conversationId);
+  if (!conversation || !shouldAutoTitle(conversation)) return;
+  const turns = conversation.messages.map((m) => ({
+    role: m.role,
+    content: m.content,
+  }));
+  void generateTitle(turns).then((title) => {
+    if (title) useChatStore.getState().setConversationTitle(conversationId, title);
+  });
+}
 
 function toUIMessage(message: Message): UIMessage {
   return { id: message.id, role: message.role, content: message.content };
@@ -24,9 +43,19 @@ export default function Home() {
   const attachIntent = useChatStore((s) => s.attachIntent);
   const selectedModelId = useChatStore((s) => s.selectedModelId);
 
+  // Load this user's persisted chats on mount + on sign-in/out (per-user history).
+  useChatSync();
+
   const { messages, setMessages } = useChat({
     id: activeConversationId ?? "new",
   });
+
+  const activeConversation = conversations.find(
+    (c) => c.id === activeConversationId,
+  );
+  // Re-run the feed hydration when a persisted conversation finishes loading its
+  // messages (loaded flips false→true), not just when the id changes.
+  const activeLoaded = activeConversation?.loaded ?? false;
 
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -50,12 +79,22 @@ export default function Home() {
     setMessages((conversation?.messages ?? []).map(toUIMessage));
     setMobileOpen(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeConversationId]);
+  }, [activeConversationId, activeLoaded]);
 
   const handleSend = useCallback(
     (text: string) => {
       const conversationId = activeConversationId;
       if (!conversationId) return;
+
+      // Prior, already-completed turns of THIS conversation — sent to the backend
+      // so the agent has context when continuing a reopened (or live) chat. Read
+      // from the store to capture committed history, excluding the message we're
+      // about to add (which travels as the request's raw_input) and any in-flight
+      // streaming bubble.
+      const priorHistory = (
+        useChatStore.getState().conversations.find((c) => c.id === conversationId)
+          ?.messages ?? []
+      ).map((m) => ({ role: m.role, content: m.content }));
 
       const userMessage: Message = {
         id: createId("user"),
@@ -104,6 +143,7 @@ export default function Home() {
           patchContent(streamed);
         },
         controller.signal,
+        priorHistory,
       )
         .then((result) => {
           // No tokens streamed -> surface the status (degraded run) or a stop
@@ -121,6 +161,7 @@ export default function Home() {
             content,
             createdAt: Date.now(),
           });
+          maybeAutoTitle(conversationId);
         })
         .catch((err: unknown) => {
           // A Stop before any response arrives rejects the fetch; that is a

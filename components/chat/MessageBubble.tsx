@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Check, Copy, Sparkles } from "lucide-react";
+import { Check, Copy } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { LoadingIndicator } from "@/components/chat/LoadingIndicator";
@@ -54,10 +54,12 @@ export function MessageBubble({ role, content, loading = false }: MessageBubbleP
         isUser ? "justify-end" : "justify-start",
       )}
     >
+      {/* The assistant avatar IS the single status icon: the star spins with its
+          loading ring while streaming, then settles to a static star at rest. */}
       {!isUser && (
         <Avatar className="mt-0.5 size-8 shrink-0">
           <AvatarFallback className="bg-primary/10 text-primary">
-            <Sparkles className="size-4" />
+            <LoadingIndicator loading={loading} />
           </AvatarFallback>
         </Avatar>
       )}
@@ -65,16 +67,20 @@ export function MessageBubble({ role, content, loading = false }: MessageBubbleP
       {/* User bubble is right-aligned: copy sits on its left (outer) edge. */}
       {isUser && copyButton}
 
-      <div
-        className={cn(
-          "max-w-[80%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap break-words",
-          isUser
-            ? "rounded-br-md bg-primary text-primary-foreground"
-            : "rounded-bl-md bg-muted text-foreground",
-        )}
-      >
-        {loading && content.length === 0 ? <LoadingIndicator /> : content}
-      </div>
+      {/* No bubble during the initial thinking phase (empty content) — the
+          animated avatar carries the whole indication, so no empty box shows. */}
+      {content.length > 0 && (
+        <div
+          className={cn(
+            "max-w-[80%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap break-words",
+            isUser
+              ? "rounded-br-md bg-primary text-primary-foreground"
+              : "rounded-bl-md bg-muted text-foreground",
+          )}
+        >
+          {content}
+        </div>
+      )}
 
       {/* Assistant bubble is left-aligned: copy sits on its right (outer) edge. */}
       {!isUser && copyButton}
