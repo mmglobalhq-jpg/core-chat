@@ -62,7 +62,10 @@ export async function POST(request: Request) {
       method: "POST",
       headers,
       body: JSON.stringify({ messages }),
-      signal: AbortSignal.timeout(20_000),
+      // Generous timeout: title generation is a local-model call that can be slow
+      // on a cold/loaded Ollama (matches the chat proxy's tolerance). Too tight a
+      // bound silently drops titles when the model is warming up.
+      signal: AbortSignal.timeout(90_000),
     });
     if (!res.ok) return NextResponse.json({ title: null });
     const data = (await res.json().catch(() => ({}))) as { title?: unknown };
