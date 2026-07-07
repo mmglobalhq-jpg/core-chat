@@ -75,7 +75,7 @@ function SidebarBody({
   const activeConversationId = useChatStore((s) => s.activeConversationId);
   const newConversation = useChatStore((s) => s.newConversation);
   const selectConversation = useChatStore((s) => s.selectConversation);
-  const deleteConversation = useChatStore((s) => s.deleteConversation);
+  const hideConversation = useChatStore((s) => s.hideConversation);
   const isAdmin = useIsAdmin();
   const router = useRouter();
 
@@ -147,21 +147,17 @@ function SidebarBody({
                   >
                     {conversation.title}
                   </button>
-                  {/* Hover/focus-revealed delete (FR: "×" on hover). Always
-                      reachable via keyboard focus for a11y / touch. */}
+                  {/* Hover/focus-revealed "remove from Recent" (soft hide — the
+                      conversation is kept in the DB). Always reachable via keyboard
+                      focus for a11y / touch. One-click: hiding is non-destructive. */}
                   <button
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      if (
-                        window.confirm(
-                          `Delete "${conversation.title}"? This can't be undone.`,
-                        )
-                      ) {
-                        deleteConversation(conversation.id);
-                      }
+                      hideConversation(conversation.id);
                     }}
-                    aria-label={`Delete chat: ${conversation.title}`}
+                    aria-label={`Remove from Recent: ${conversation.title}`}
+                    title="Remove from Recent"
                     className={cn(
                       "absolute right-1 top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:opacity-100 group-hover:opacity-100",
                     )}

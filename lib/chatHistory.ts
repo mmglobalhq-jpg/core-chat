@@ -28,6 +28,7 @@ export async function listChats(): Promise<ChatRow[]> {
   const { data, error } = await supabase
     .from("chats")
     .select("id, title, created_at, updated_at")
+    .eq("hidden", false) // hidden chats are removed from Recent but kept in the DB
     .order("updated_at", { ascending: false });
   if (error || !data) return [];
   return data as ChatRow[];
@@ -96,9 +97,13 @@ export async function renameChat(chatId: string, title: string): Promise<void> {
   await supabase.from("chats").update({ title }).eq("id", chatId);
 }
 
-/** Delete a chat; `messages` rows cascade via the FK. RLS enforces ownership. */
-export async function deleteChat(chatId: string): Promise<void> {
+/**
+ * Remove a chat from Recent WITHOUT deleting it: sets `hidden = true`. The row
+ * and all its messages stay in the DB (recoverable), just excluded from
+ * `listChats`. RLS `chats_update_own` already permits the owner to do this.
+ */
+export async function hideChat(chatId: string): Promise<void> {
   const uid = await currentUserId();
   if (!uid) return;
-  await supabase.from("chats").delete().eq("id", chatId);
+  await supabase.from("chats").update({ hidden: true }).eq("id", chatId);
 }

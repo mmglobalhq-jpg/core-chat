@@ -66,21 +66,21 @@ describe("selectConversation (US2 / FR-008)", () => {
   });
 });
 
-describe("deleteConversation", () => {
-  it("removes a non-active conversation and keeps the active one", () => {
+describe("hideConversation", () => {
+  it("removes a non-active conversation from the list and keeps the active one", () => {
     const state = useChatStore.getState();
     const active = state.activeConversationId;
     const victim = state.conversations.find((c) => c.id !== active)!;
-    useChatStore.getState().deleteConversation(victim.id);
+    useChatStore.getState().hideConversation(victim.id);
 
     const after = useChatStore.getState();
     expect(after.conversations.some((c) => c.id === victim.id)).toBe(false);
     expect(after.activeConversationId).toBe(active);
   });
 
-  it("falls back to a fresh blank conversation when the active chat is deleted", () => {
+  it("falls back to a fresh blank conversation when the active chat is hidden", () => {
     const active = useChatStore.getState().activeConversationId!;
-    useChatStore.getState().deleteConversation(active);
+    useChatStore.getState().hideConversation(active);
 
     const after = useChatStore.getState();
     expect(after.conversations.some((c) => c.id === active)).toBe(false);

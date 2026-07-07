@@ -2,8 +2,8 @@ import { create } from "zustand";
 import type { Conversation, IntentPayload, Message, ModelId } from "@/lib/types";
 import { DEFAULT_MODEL_ID, createId, isModelId } from "@/lib/mock-data";
 import {
-  deleteChat,
   ensureChat,
+  hideChat,
   insertMessage,
   listChats,
   loadMessages,
@@ -22,7 +22,8 @@ interface ChatStore {
   newConversation: () => void;
   selectConversation: (id: string) => void;
   appendMessage: (conversationId: string, message: Message) => void;
-  deleteConversation: (id: string) => void;
+  /** Remove a chat from Recent (hides it in the DB; conversation data is kept). */
+  hideConversation: (id: string) => void;
   /** Apply an (LLM-generated) title: update state, flag titled, persist via RLS. */
   setConversationTitle: (id: string, title: string) => void;
 
@@ -160,8 +161,8 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     void renameChat(id, title); // best-effort persist (RLS-scoped)
   },
 
-  deleteConversation: (id) => {
-    void deleteChat(id); // best-effort; messages cascade via FK. RLS-scoped.
+  hideConversation: (id) => {
+    void hideChat(id); // best-effort; row + messages are kept in the DB. RLS-scoped.
     ensured.delete(id);
     writeChains.delete(id);
     set((state) => {
@@ -172,7 +173,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           activeConversationId: state.activeConversationId,
         };
       }
-      // Deleting the active chat: fall back to a fresh blank one.
+      // Hiding the active chat: fall back to a fresh blank one.
       const blank = blankConversation();
       return { conversations: [blank, ...remaining], activeConversationId: blank.id };
     });
