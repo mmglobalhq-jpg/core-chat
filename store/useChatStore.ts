@@ -1,29 +1,30 @@
 import { create } from "zustand";
-import type {
-  Conversation,
-  IntentPayload,
-  Message,
-  ModelId,
-} from "@/lib/types";
+import type { Conversation, IntentPayload, Message, ModelId } from "@/lib/types";
+import { DEFAULT_MODEL_ID, createId, isModelId } from "@/lib/mock-data";
 import {
-  DEFAULT_MODEL_ID,
-  createId,
-  isModelId,
-  seedConversations,
-} from "@/lib/mock-data";
+  deleteChat,
+  ensureChat,
+  insertMessage,
+  listChats,
+  loadMessages,
+} from "@/lib/chatHistory";
 
 interface ChatStore {
   // Model selection (US3 / FR-010, FR-011)
   selectedModelId: ModelId;
   setSelectedModel: (id: ModelId) => void;
 
-  // Conversations / mock history (US2 / FR-007, FR-008, FR-023)
+  // Conversations / persisted history (US2 / FR-007, FR-008, FR-023)
   conversations: Conversation[];
   activeConversationId: string | null;
 
   newConversation: () => void;
   selectConversation: (id: string) => void;
   appendMessage: (conversationId: string, message: Message) => void;
+  deleteConversation: (id: string) => void;
+
+  /** Load the signed-in user's chats from Supabase (call on mount / user change). */
+  hydrateForUser: () => Promise<void>;
 
   // Intent routing (amendment / FR-024, FR-028)
   attachIntent: (
@@ -36,15 +37,53 @@ interface ChatStore {
   activeConversation: () => Conversation | null;
 }
 
-function blankConversation(order: number): Conversation {
-  return { id: createId("conv"), title: "New chat", messages: [], updatedAt: order };
+/** Prefer a real UUID (so it maps 1:1 onto the Supabase `chats.id` uuid column);
+ * fall back to the counter id only in environments without WebCrypto (tests). */
+function newChatId(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return createId("conv");
 }
 
-const seeded = seedConversations();
-// Open on a fresh, blank conversation so the first paint shows the empty-state
-// hero. Prior mock conversations remain available in the sidebar history; the
-// blank one is hidden from that list until it has messages (see Sidebar).
-const initialConversation = blankConversation(seeded.length + 1);
+function blankConversation(): Conversation {
+  return {
+    id: newChatId(),
+    title: "New chat",
+    messages: [],
+    updatedAt: Date.now(),
+    persisted: false, // no DB row until the first message is sent
+    loaded: true, // nothing to hydrate — it's empty
+  };
+}
+
+// --- Supabase write plumbing (best-effort, never surfaced to the UI) --------
+// Per-conversation promise chains serialize writes so ensureChat() lands before
+// its first insertMessage() (FK order) and turns persist in submission order.
+const writeChains = new Map<string, Promise<void>>();
+// Conversations already known to have a `chats` row (fetched or ensured), so we
+// don't re-issue the idempotent upsert on every turn.
+const ensured = new Set<string>();
+
+function persistTurn(convId: string, title: string, message: Message) {
+  const prev = writeChains.get(convId) ?? Promise.resolve();
+  const next = prev
+    .then(async () => {
+      if (!ensured.has(convId)) {
+        await ensureChat(convId, title);
+        ensured.add(convId);
+      }
+      await insertMessage(convId, message);
+    })
+    .catch(() => {
+      // Best-effort persistence: a failed write must never break the live chat.
+      // Allow a later turn to retry ensureChat by clearing the flag.
+      ensured.delete(convId);
+    });
+  writeChains.set(convId, next);
+}
+
+const initialConversation = blankConversation();
 
 export const useChatStore = create<ChatStore>((set, get) => ({
   selectedModelId: DEFAULT_MODEL_ID,
@@ -55,11 +94,13 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     set({ selectedModelId: id });
   },
 
-  conversations: [initialConversation, ...seeded],
+  // Open on a fresh blank conversation; real history is loaded from Supabase by
+  // hydrateForUser() once the auth session is known (see useChatSync).
+  conversations: [initialConversation],
   activeConversationId: initialConversation.id,
 
   newConversation: () => {
-    const conversation = blankConversation(get().conversations.length + 1);
+    const conversation = blankConversation();
     set((state) => ({
       conversations: [conversation, ...state.conversations],
       activeConversationId: conversation.id,
@@ -67,9 +108,20 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   },
 
   selectConversation: (id) => {
-    const exists = get().conversations.some((c) => c.id === id);
-    if (!exists) return;
+    const conv = get().conversations.find((c) => c.id === id);
+    if (!conv) return; // ignore unknown ids (FR-008)
     set({ activeConversationId: id });
+    // Lazily hydrate a persisted conversation's messages on first open. The
+    // `loaded` flip re-runs the feed effect in page.tsx (keyed on it).
+    if (conv.persisted && !conv.loaded) {
+      void loadMessages(id).then((messages) => {
+        set((state) => ({
+          conversations: state.conversations.map((c) =>
+            c.id === id ? { ...c, messages, loaded: true } : c,
+          ),
+        }));
+      });
+    }
   },
 
   appendMessage: (conversationId, message) => {
@@ -79,7 +131,10 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           ? {
               ...c,
               messages: [...c.messages, message],
-              updatedAt: c.messages.length + 1,
+              updatedAt: Date.now(),
+              // Optimistically show in history immediately; the row is written
+              // below (lazily created on the first user turn).
+              persisted: true,
               title:
                 c.title === "New chat" && message.role === "user"
                   ? deriveTitle(message.content)
@@ -88,11 +143,59 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           : c,
       ),
     }));
+    // Persist this turn (best-effort, serialized per conversation).
+    const conv = get().conversations.find((c) => c.id === conversationId);
+    if (conv) persistTurn(conversationId, conv.title, message);
+  },
+
+  deleteConversation: (id) => {
+    void deleteChat(id); // best-effort; messages cascade via FK. RLS-scoped.
+    ensured.delete(id);
+    writeChains.delete(id);
+    set((state) => {
+      const remaining = state.conversations.filter((c) => c.id !== id);
+      if (state.activeConversationId !== id) {
+        return {
+          conversations: remaining,
+          activeConversationId: state.activeConversationId,
+        };
+      }
+      // Deleting the active chat: fall back to a fresh blank one.
+      const blank = blankConversation();
+      return { conversations: [blank, ...remaining], activeConversationId: blank.id };
+    });
+  },
+
+  hydrateForUser: async () => {
+    const chats = await listChats(); // [] when signed out
+    const fetched: Conversation[] = chats.map((c) => ({
+      id: c.id,
+      title: c.title,
+      messages: [],
+      updatedAt: Date.parse(c.updated_at) || 0,
+      persisted: true,
+      loaded: false,
+    }));
+    fetched.forEach((c) => ensured.add(c.id)); // rows already exist
+    set((state) => {
+      // Preserve an in-progress conversation (already has messages) across a
+      // hydrate; otherwise start fresh on a blank one.
+      const current = state.conversations.find(
+        (c) => c.id === state.activeConversationId,
+      );
+      const keepCurrent = !!current && current.messages.length > 0;
+      const head = keepCurrent ? current! : blankConversation();
+      const rest = keepCurrent
+        ? fetched.filter((c) => c.id !== current!.id)
+        : fetched;
+      return { conversations: [head, ...rest], activeConversationId: head.id };
+    });
   },
 
   attachIntent: (conversationId, messageId, payload) => {
     // No-op if the conversation or message is gone (graceful — FR-028).
-    // Does not touch message order, updatedAt, or the reply flow.
+    // Does not touch message order, updatedAt, or the reply flow. In-memory
+    // only for now — see the chat-history plan re: the DB intent column.
     set((state) => ({
       conversations: state.conversations.map((c) =>
         c.id === conversationId

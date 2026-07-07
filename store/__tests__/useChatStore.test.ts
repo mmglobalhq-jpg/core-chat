@@ -16,11 +16,12 @@ describe("initial state (blank-on-load)", () => {
     expect(active?.messages).toEqual([]);
   });
 
-  it("keeps prior mock conversations available for history browsing", () => {
-    const withMessages = INITIAL_STATE.conversations.filter(
-      (c) => c.messages.length > 0,
-    );
-    expect(withMessages.length).toBeGreaterThanOrEqual(1);
+  it("starts with only a fresh blank conversation (history loads from Supabase)", () => {
+    // No mock seeds in the store anymore — real per-user history is hydrated via
+    // hydrateForUser(); the store opens on a single empty, unpersisted chat.
+    expect(INITIAL_STATE.conversations).toHaveLength(1);
+    expect(INITIAL_STATE.conversations[0].persisted).toBe(false);
+    expect(INITIAL_STATE.conversations[0].messages).toEqual([]);
   });
 });
 
@@ -57,6 +58,32 @@ describe("selectConversation (US2 / FR-008)", () => {
     const current = useChatStore.getState().activeConversationId;
     useChatStore.getState().selectConversation("does-not-exist");
     expect(useChatStore.getState().activeConversationId).toBe(current);
+  });
+});
+
+describe("deleteConversation", () => {
+  it("removes a non-active conversation and keeps the active one", () => {
+    const state = useChatStore.getState();
+    const active = state.activeConversationId;
+    const victim = state.conversations.find((c) => c.id !== active)!;
+    useChatStore.getState().deleteConversation(victim.id);
+
+    const after = useChatStore.getState();
+    expect(after.conversations.some((c) => c.id === victim.id)).toBe(false);
+    expect(after.activeConversationId).toBe(active);
+  });
+
+  it("falls back to a fresh blank conversation when the active chat is deleted", () => {
+    const active = useChatStore.getState().activeConversationId!;
+    useChatStore.getState().deleteConversation(active);
+
+    const after = useChatStore.getState();
+    expect(after.conversations.some((c) => c.id === active)).toBe(false);
+    // A new blank conversation becomes active.
+    expect(after.activeConversationId).not.toBe(active);
+    const head = after.conversations[0];
+    expect(head.id).toBe(after.activeConversationId);
+    expect(head.messages).toEqual([]);
   });
 });
 

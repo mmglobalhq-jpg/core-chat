@@ -44,13 +44,40 @@ function toModelPreference(uiModel: unknown): string {
   return MODEL_PREFERENCE_MAP[uiModel] ?? DEFAULT_MODEL_PREFERENCE;
 }
 
+// Prior conversation turns forwarded to the backend as IntentPayload.history so
+// the agent has context. Coerced to the strict {role, content} contract, dropping
+// anything malformed; content is length-capped and the list is bounded (the
+// backend also caps to its own last-N, this just limits payload size on the wire).
+const MAX_HISTORY_TURNS = 40;
+const MAX_HISTORY_CONTENT = 8000;
+
+function toHistory(
+  raw: unknown,
+): { role: "user" | "assistant"; content: string }[] {
+  if (!Array.isArray(raw)) return [];
+  const turns: { role: "user" | "assistant"; content: string }[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const role = (item as { role?: unknown }).role;
+    const content = (item as { content?: unknown }).content;
+    if ((role !== "user" && role !== "assistant") || typeof content !== "string") {
+      continue;
+    }
+    turns.push({ role, content: content.slice(0, MAX_HISTORY_CONTENT) });
+  }
+  // Keep the most recent turns if the client sent an unusually long history.
+  return turns.slice(-MAX_HISTORY_TURNS);
+}
+
 export async function POST(request: Request) {
   let text: string;
   let modelPreference: string;
+  let history: { role: "user" | "assistant"; content: string }[];
   try {
     const body = await request.json();
     text = typeof body?.text === "string" ? body.text : "";
     modelPreference = toModelPreference(body?.model);
+    history = toHistory(body?.history);
   } catch {
     return NextResponse.json({ error: "invalid request body" }, { status: 400 });
   }
@@ -64,6 +91,7 @@ export async function POST(request: Request) {
     raw_input: text,
     source: "core-chat-ui",
     model_preference: modelPreference,
+    history,
   };
 
   // Forward the user's Supabase Bearer JWT (identity) and, when hitting the

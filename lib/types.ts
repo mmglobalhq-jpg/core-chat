@@ -32,4 +32,24 @@ export interface Conversation {
   title: string;
   messages: Message[];
   updatedAt: number;
+  /**
+   * True once a corresponding row exists in Supabase `chats` (persisted history).
+   * A brand-new, never-sent conversation is `false` and stays hidden from the
+   * sidebar history until it has messages. Client-only; not sent to the backend.
+   */
+  persisted?: boolean;
+  /**
+   * True once this conversation's messages have been hydrated from Supabase.
+   * Metadata-only conversations (loaded via `listChats`) start `false` and are
+   * lazily filled on first select. Client-only.
+   */
+  loaded?: boolean;
+}
+
+/** A `public.chats` row as selected from Supabase (metadata only, no messages). */
+export interface ChatRow {
+  id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
 }

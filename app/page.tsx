@@ -8,6 +8,7 @@ import { Header } from "@/components/layout/Header";
 import { ChatFeed } from "@/components/chat/ChatFeed";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { useChatStore } from "@/store/useChatStore";
+import { useChatSync } from "@/lib/useChatSync";
 import { createId } from "@/lib/mock-data";
 import { routeMessage } from "@/lib/router";
 import { sendChat } from "@/lib/api";
@@ -24,9 +25,19 @@ export default function Home() {
   const attachIntent = useChatStore((s) => s.attachIntent);
   const selectedModelId = useChatStore((s) => s.selectedModelId);
 
+  // Load this user's persisted chats on mount + on sign-in/out (per-user history).
+  useChatSync();
+
   const { messages, setMessages } = useChat({
     id: activeConversationId ?? "new",
   });
+
+  const activeConversation = conversations.find(
+    (c) => c.id === activeConversationId,
+  );
+  // Re-run the feed hydration when a persisted conversation finishes loading its
+  // messages (loaded flips false→true), not just when the id changes.
+  const activeLoaded = activeConversation?.loaded ?? false;
 
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -50,12 +61,22 @@ export default function Home() {
     setMessages((conversation?.messages ?? []).map(toUIMessage));
     setMobileOpen(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeConversationId]);
+  }, [activeConversationId, activeLoaded]);
 
   const handleSend = useCallback(
     (text: string) => {
       const conversationId = activeConversationId;
       if (!conversationId) return;
+
+      // Prior, already-completed turns of THIS conversation — sent to the backend
+      // so the agent has context when continuing a reopened (or live) chat. Read
+      // from the store to capture committed history, excluding the message we're
+      // about to add (which travels as the request's raw_input) and any in-flight
+      // streaming bubble.
+      const priorHistory = (
+        useChatStore.getState().conversations.find((c) => c.id === conversationId)
+          ?.messages ?? []
+      ).map((m) => ({ role: m.role, content: m.content }));
 
       const userMessage: Message = {
         id: createId("user"),
@@ -104,6 +125,7 @@ export default function Home() {
           patchContent(streamed);
         },
         controller.signal,
+        priorHistory,
       )
         .then((result) => {
           // No tokens streamed -> surface the status (degraded run) or a stop

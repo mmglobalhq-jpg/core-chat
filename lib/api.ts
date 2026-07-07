@@ -20,6 +20,7 @@ export async function sendChat(
   model?: string,
   onToken?: (token: string) => void,
   signal?: AbortSignal,
+  history?: { role: string; content: string }[],
 ): Promise<ChatResult> {
   // Attach the active user's Supabase session JWT so the proxy can forward it as
   // `Authorization: Bearer <token>` to the backend, which verifies it and resolves
@@ -36,7 +37,9 @@ export async function sendChat(
   const res = await fetch("/api/intent", {
     method: "POST",
     headers,
-    body: JSON.stringify({ text, model }),
+    // `history` carries prior conversation turns so the backend can seed the
+    // agent with context (see /api/intent proxy + IntentPayload.history).
+    body: JSON.stringify({ text, model, history }),
     signal,
   });
 
