@@ -4,14 +4,21 @@ import { useEffect, useRef } from "react";
 import type { Message as UIMessage } from "ai";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { MessageBubble } from "@/components/chat/MessageBubble";
+import type { DocumentRow } from "@/lib/types";
 
 interface ChatFeedProps {
   messages: UIMessage[];
   /** True while the newest assistant reply is still streaming in. */
   isStreaming?: boolean;
+  /** Attached documents keyed by message id (rendered as chips on that message). */
+  docsByMessage?: Record<string, DocumentRow[]>;
 }
 
-export function ChatFeed({ messages, isStreaming = false }: ChatFeedProps) {
+export function ChatFeed({
+  messages,
+  isStreaming = false,
+  docsByMessage = {},
+}: ChatFeedProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   // Keep the latest message in view as new ones arrive (FR-015).
@@ -41,6 +48,7 @@ export function ChatFeed({ messages, isStreaming = false }: ChatFeedProps) {
                   key={message.id}
                   role={message.role}
                   content={message.content}
+                  docs={docsByMessage[message.id]}
                   loading={
                     isStreaming &&
                     index === messages.length - 1 &&

@@ -8,9 +8,10 @@ import { ChatFeed } from "@/components/chat/ChatFeed";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { useChatStore, shouldAutoTitle } from "@/store/useChatStore";
 import { useChatSync } from "@/lib/useChatSync";
-import { createId } from "@/lib/mock-data";
 import { sendChat, generateTitle } from "@/lib/api";
+import { attachToMessage, listDocumentsForChat } from "@/lib/documents";
 import type { Message } from "@/lib/types";
+import type { PendingDoc } from "@/components/chat/ChatInput";
 
 /**
  * After a reply lands, if the conversation just hit its 2nd exchange, ask the
@@ -76,8 +77,22 @@ export default function Home() {
     setMobileOpen(false);
   }, [activeConversationId]);
 
+  // Doc chips: load the active chat's attached documents (grouped by message).
+  const docsByMessage = useChatStore((s) => s.docsByMessage);
+  const setChatDocuments = useChatStore((s) => s.setChatDocuments);
+  useEffect(() => {
+    if (!activeConversationId) return;
+    let cancelled = false;
+    void listDocumentsForChat(activeConversationId).then((docs) => {
+      if (!cancelled) setChatDocuments(docs);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeConversationId, setChatDocuments]);
+
   const handleSend = useCallback(
-    (text: string) => {
+    (text: string, docs: PendingDoc[] = []) => {
       const conversationId = activeConversationId;
       if (!conversationId) return;
       const store = useChatStore.getState();
@@ -88,17 +103,39 @@ export default function Home() {
         store.conversations.find((c) => c.id === conversationId)?.messages ?? []
       ).map((m) => ({ role: m.role, content: m.content }));
 
-      // User turn: append + persist immediately (optimistic).
+      // User turn: append + persist immediately (optimistic). Client-minted UUID so
+      // attached docs (documents.message_id) link to it across reloads.
+      const userMessageId = crypto.randomUUID();
       store.appendMessage(conversationId, {
-        id: createId("user"),
+        id: userMessageId,
         role: "user",
         content: text,
         createdAt: Date.now(),
       });
 
+      // Attach ready docs to this message: render the chip now + persist the link,
+      // and forward their ids so the backend injects their text.
+      const readyDocs = docs.filter((d) => d.status === "ready");
+      if (readyDocs.length > 0) {
+        store.addMessageDocuments(
+          userMessageId,
+          readyDocs.map((d) => ({
+            id: d.id,
+            chat_id: conversationId,
+            message_id: userMessageId,
+            filename: d.filename,
+            content_type: d.contentType,
+            status: "ready" as const,
+            error: null,
+          })),
+        );
+        readyDocs.forEach((d) => void attachToMessage(d.id, userMessageId));
+      }
+      const docIds = readyDocs.map((d) => d.id);
+
       // Assistant turn: an empty placeholder in the store to stream into; patched
       // per token; finalized (final content + single persist) when the stream ends.
-      const assistantId = createId("assistant");
+      const assistantId = crypto.randomUUID();
       store.beginAssistantMessage(conversationId, {
         id: assistantId,
         role: "assistant",
@@ -127,6 +164,7 @@ export default function Home() {
         },
         controller.signal,
         priorHistory,
+        docIds,
       )
         .then((result) => {
           finalize(
@@ -170,7 +208,11 @@ export default function Home() {
           onToggleSidebar={() => setCollapsed((c) => !c)}
         />
         <main className="relative min-h-0 flex-1">
-          <ChatFeed messages={messages} isStreaming={isStreaming} />
+          <ChatFeed
+            messages={messages}
+            isStreaming={isStreaming}
+            docsByMessage={docsByMessage}
+          />
           <ChatInput
             onSend={handleSend}
             isStreaming={isStreaming}

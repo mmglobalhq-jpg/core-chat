@@ -34,11 +34,15 @@ export async function POST(request: Request) {
   let text: string;
   let modelPreference: string;
   let history;
+  let documentIds: string[] = [];
   try {
     const body = await request.json();
     text = typeof body?.text === "string" ? body.text : "";
     modelPreference = toModelPreference(body?.model);
     history = toTurns(body?.history);
+    documentIds = Array.isArray(body?.document_ids)
+      ? body.document_ids.filter((d: unknown) => typeof d === "string").slice(0, 10)
+      : [];
   } catch {
     return NextResponse.json({ error: "invalid request body" }, { status: 400 });
   }
@@ -53,6 +57,7 @@ export async function POST(request: Request) {
     source: "core-chat-ui",
     model_preference: modelPreference,
     history,
+    document_ids: documentIds,
   };
 
   let res: Response;
