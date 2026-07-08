@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Conversation, IntentPayload, Message, ModelId } from "@/lib/types";
+import type { Conversation, Message, ModelId } from "@/lib/types";
 import { DEFAULT_MODEL_ID, createId, isModelId } from "@/lib/mock-data";
 import {
   ensureChat,
@@ -29,13 +29,6 @@ interface ChatStore {
 
   /** Load the signed-in user's chats from Supabase (call on mount / user change). */
   hydrateForUser: () => Promise<void>;
-
-  // Intent routing (amendment / FR-024, FR-028)
-  attachIntent: (
-    conversationId: string,
-    messageId: string,
-    payload: IntentPayload,
-  ) => void;
 
   // Derived helper
   activeConversation: () => Conversation | null;
@@ -118,11 +111,17 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     // Lazily hydrate a persisted conversation's messages on first open. The
     // `loaded` flip re-runs the feed effect in page.tsx (keyed on it).
     if (conv.persisted && !conv.loaded) {
-      void loadMessages(id).then((messages) => {
+      void loadMessages(id).then((loaded) => {
         set((state) => ({
-          conversations: state.conversations.map((c) =>
-            c.id === id ? { ...c, messages, loaded: true } : c,
-          ),
+          conversations: state.conversations.map((c) => {
+            if (c.id !== id) return c;
+            // Reconcile, don't clobber: if turns were appended while the DB load
+            // was in flight (user sent a message before it resolved), keep them
+            // AFTER the loaded history rather than overwriting them (C-1).
+            const messages =
+              c.messages.length > 0 ? [...loaded, ...c.messages] : loaded;
+            return { ...c, messages, loaded: true };
+          }),
         }));
       });
     }
@@ -203,24 +202,6 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         : fetched;
       return { conversations: [head, ...rest], activeConversationId: head.id };
     });
-  },
-
-  attachIntent: (conversationId, messageId, payload) => {
-    // No-op if the conversation or message is gone (graceful — FR-028).
-    // Does not touch message order, updatedAt, or the reply flow. In-memory
-    // only for now — see the chat-history plan re: the DB intent column.
-    set((state) => ({
-      conversations: state.conversations.map((c) =>
-        c.id === conversationId
-          ? {
-              ...c,
-              messages: c.messages.map((m) =>
-                m.id === messageId ? { ...m, intent: payload } : m,
-              ),
-            }
-          : c,
-      ),
-    }));
   },
 
   activeConversation: () => {

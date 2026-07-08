@@ -49,7 +49,6 @@ export async function loadMessages(chatId: string): Promise<Message[]> {
     role: row.role as Role,
     content: (row.content as string) ?? "",
     createdAt: Date.parse(row.created_at as string) || 0,
-    intent: (row.intent as Message["intent"]) ?? undefined,
   }));
 }
 
@@ -82,7 +81,6 @@ export async function insertMessage(
     chat_id: chatId,
     role: message.role,
     content: message.content,
-    intent: message.intent ?? null,
   });
   await supabase
     .from("chats")
