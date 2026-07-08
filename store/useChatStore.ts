@@ -3,6 +3,7 @@ import type { Conversation, Message, ModelId } from "@/lib/types";
 import { DEFAULT_MODEL_ID, createId, isModelId } from "@/lib/mock-data";
 import {
   ensureChat,
+  getUserId,
   hideChat,
   insertMessage,
   listChats,
@@ -66,11 +67,13 @@ function persistTurn(convId: string, title: string, message: Message) {
   const prev = writeChains.get(convId) ?? Promise.resolve();
   const next = prev
     .then(async () => {
+      const uid = await getUserId(); // resolve the session once per turn, not per write
+      if (!uid) return;
       if (!ensured.has(convId)) {
-        await ensureChat(convId, title);
+        await ensureChat(uid, convId, title);
         ensured.add(convId);
       }
-      await insertMessage(convId, message);
+      await insertMessage(uid, convId, message);
     })
     .catch(() => {
       // Best-effort persistence: a failed write must never break the live chat.
