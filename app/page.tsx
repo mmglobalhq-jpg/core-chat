@@ -131,7 +131,19 @@ export default function Home() {
         );
         readyDocs.forEach((d) => void attachToMessage(d.id, userMessageId));
       }
-      const docIds = readyDocs.map((d) => d.id);
+      // Re-inject EVERY ready doc attached to this conversation (not just the ones
+      // uploaded on this turn), so the assistant keeps "seeing" an uploaded file
+      // across follow-up questions — not only on the message it was attached to.
+      // docsByMessage already includes the just-added docs (addMessageDocuments is
+      // synchronous) plus any loaded from history.
+      const docIds = Array.from(
+        new Set(
+          Object.values(useChatStore.getState().docsByMessage)
+            .flat()
+            .filter((d) => d.status === "ready")
+            .map((d) => d.id),
+        ),
+      );
 
       // Assistant turn: an empty placeholder in the store to stream into; patched
       // per token; finalized (final content + single persist) when the stream ends.
