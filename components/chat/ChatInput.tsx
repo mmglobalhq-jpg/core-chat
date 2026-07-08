@@ -119,7 +119,7 @@ export function ChatInput({ onSend, isStreaming = false, onStop }: ChatInputProp
         void setDocumentStatus(it.id, "processing");
         const res = await requestParse(it.id, it.filename, it.contentType);
         patch(it.id, { status: res.status, error: res.error });
-        void setDocumentStatus(it.id, res.status, res.error);
+        void setDocumentStatus(it.id, res.status, res.error, res.charCount);
       } catch (e) {
         patch(it.id, {
           status: "error",

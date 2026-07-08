@@ -49,7 +49,7 @@ export async function requestParse(
   docId: string,
   filename: string,
   contentType: string,
-): Promise<{ status: DocumentStatus; error?: string }> {
+): Promise<{ status: DocumentStatus; error?: string; charCount?: number }> {
   try {
     const {
       data: { session },
@@ -65,9 +65,10 @@ export async function requestParse(
     const data = (await res.json().catch(() => ({}))) as {
       status?: string;
       error?: string;
+      char_count?: number;
     };
     return data.status === "ready"
-      ? { status: "ready" }
+      ? { status: "ready", charCount: data.char_count }
       : { status: "error", error: data.error };
   } catch (e) {
     return { status: "error", error: e instanceof Error ? e.message : String(e) };
@@ -79,13 +80,16 @@ export async function setDocumentStatus(
   docId: string,
   status: DocumentStatus,
   error?: string,
+  charCount?: number,
 ): Promise<void> {
   const uid = await getUserId();
   if (!uid) return;
-  await supabase
-    .from("documents")
-    .update({ status, error: error ?? null })
-    .eq("id", docId);
+  const patch: { status: DocumentStatus; error: string | null; char_count?: number } = {
+    status,
+    error: error ?? null,
+  };
+  if (typeof charCount === "number") patch.char_count = charCount;
+  await supabase.from("documents").update(patch).eq("id", docId);
 }
 
 /** Link a ready document to the user message it was sent with (for history). */
