@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Conversation, Message, ModelId } from "@/lib/types";
+import type { Conversation, DocumentRow, Message, ModelId } from "@/lib/types";
 import { DEFAULT_MODEL_ID, createId, isModelId } from "@/lib/mock-data";
 import {
   ensureChat,
@@ -46,6 +46,16 @@ interface ChatStore {
 
   /** Load the signed-in user's chats from Supabase (call on mount / user change). */
   hydrateForUser: () => Promise<void>;
+
+  // Attached documents, keyed by the message id they were sent with (rendering).
+  docsByMessage: Record<string, DocumentRow[]>;
+  /** Ensure the chat row exists in Supabase (so a document's chat_id FK resolves
+   *  before the first message is sent). */
+  ensureChatPersisted: (id: string) => Promise<void>;
+  /** Replace the doc map from a chat's documents (on load), grouped by message. */
+  setChatDocuments: (docs: DocumentRow[]) => void;
+  /** Attach documents to a message in the live view (on send). */
+  addMessageDocuments: (messageId: string, docs: DocumentRow[]) => void;
 
   // Derived helper
   activeConversation: () => Conversation | null;
@@ -268,6 +278,35 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         : fetched;
       return { conversations: [head, ...rest], activeConversationId: head.id };
     });
+  },
+
+  docsByMessage: {},
+
+  ensureChatPersisted: async (id) => {
+    if (ensured.has(id)) return;
+    const uid = await getUserId();
+    if (!uid) return;
+    const conv = get().conversations.find((c) => c.id === id);
+    await ensureChat(uid, id, conv?.title ?? "New chat");
+    ensured.add(id);
+  },
+
+  setChatDocuments: (docs) => {
+    const byMsg: Record<string, DocumentRow[]> = {};
+    for (const d of docs) {
+      if (!d.message_id) continue;
+      (byMsg[d.message_id] ??= []).push(d);
+    }
+    set({ docsByMessage: byMsg });
+  },
+
+  addMessageDocuments: (messageId, docs) => {
+    set((state) => ({
+      docsByMessage: {
+        ...state.docsByMessage,
+        [messageId]: [...(state.docsByMessage[messageId] ?? []), ...docs],
+      },
+    }));
   },
 
   activeConversation: () => {

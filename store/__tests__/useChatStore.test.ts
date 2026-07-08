@@ -286,3 +286,30 @@ describe("streaming assistant lifecycle (single source of truth / C-2)", () => {
     expect(convA.messages.find((m) => m.id === "a1")?.content).toBe("streaming...");
   });
 });
+
+describe("document attachments", () => {
+  const doc = (id: string, messageId: string | null, status = "ready" as const) => ({
+    id,
+    chat_id: "c",
+    message_id: messageId,
+    filename: `${id}.pdf`,
+    content_type: "application/pdf",
+    status,
+    error: null,
+  });
+
+  it("setChatDocuments groups by message_id and drops unattached docs", () => {
+    useChatStore
+      .getState()
+      .setChatDocuments([doc("d1", "m1"), doc("d2", "m1"), doc("d3", null)]);
+    const map = useChatStore.getState().docsByMessage;
+    expect(map["m1"]?.map((d) => d.id)).toEqual(["d1", "d2"]);
+    expect(Object.values(map).flat().some((d) => d.id === "d3")).toBe(false);
+  });
+
+  it("addMessageDocuments appends to a message", () => {
+    useChatStore.getState().setChatDocuments([]);
+    useChatStore.getState().addMessageDocuments("m9", [doc("x", "m9")]);
+    expect(useChatStore.getState().docsByMessage["m9"]?.[0]?.id).toBe("x");
+  });
+});

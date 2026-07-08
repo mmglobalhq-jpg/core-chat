@@ -45,3 +45,16 @@ export interface ChatRow {
   created_at: string;
   updated_at: string;
 }
+
+export type DocumentStatus = "uploading" | "processing" | "ready" | "error";
+
+/** An uploaded document (a `public.documents` row) attached to a chat message. */
+export interface DocumentRow {
+  id: string;
+  chat_id: string | null;
+  message_id: string | null;
+  filename: string;
+  content_type: string | null;
+  status: DocumentStatus;
+  error: string | null;
+}

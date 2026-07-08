@@ -60,13 +60,14 @@ export async function sendChat(
   onToken?: (token: string) => void,
   signal?: AbortSignal,
   history?: { role: string; content: string }[],
+  docIds?: string[],
 ): Promise<ChatResult> {
   const res = await fetch("/api/intent", {
     method: "POST",
     headers: await authHeaders(),
-    // `history` carries prior conversation turns so the backend can seed the
-    // agent with context (see /api/intent proxy + IntentPayload.history).
-    body: JSON.stringify({ text, model, history }),
+    // `history` seeds prior turns; `document_ids` names attached docs whose
+    // extracted text the backend injects into the model's context.
+    body: JSON.stringify({ text, model, history, document_ids: docIds }),
     signal,
   });
 

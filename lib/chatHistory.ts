@@ -82,6 +82,7 @@ export async function insertMessage(
 ): Promise<void> {
   void uid; // ownership enforced by RLS; uid resolved once by the caller
   await supabase.from("messages").insert({
+    id: message.id, // client-minted UUID, so attachments (documents.message_id) link on reload
     chat_id: chatId,
     role: message.role,
     content: message.content,
