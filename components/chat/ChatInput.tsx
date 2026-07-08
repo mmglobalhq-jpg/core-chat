@@ -70,30 +70,62 @@ export function ChatInput({ onSend, isStreaming = false, onStop }: ChatInputProp
     if (!files || files.length === 0) return;
     const convId = useChatStore.getState().activeConversationId;
     if (!convId) return;
-    // A document's chat_id FK needs the chat row to exist before we insert it.
-    await useChatStore.getState().ensureChatPersisted(convId);
 
-    for (const file of Array.from(files)) {
-      const id = crypto.randomUUID();
-      const contentType = file.type || "application/octet-stream";
-      const base: PendingDoc = { id, filename: file.name, contentType, status: "uploading" };
-      if (file.size > MAX_FILE_BYTES) {
-        setPending((prev) => [...prev, { ...base, status: "error", error: "over 20 MB" }]);
-        continue;
+    // Show chips IMMEDIATELY (before any await) so there's instant feedback even
+    // if the network/auth is slow — the old order left the UI blank until the
+    // first await resolved, and swallowed failures entirely.
+    const items = Array.from(files).map((file) => ({
+      id: crypto.randomUUID(),
+      file,
+      filename: file.name,
+      contentType: file.type || "application/octet-stream",
+      tooBig: file.size > MAX_FILE_BYTES,
+    }));
+    setPending((prev) => [
+      ...prev,
+      ...items.map((it) => ({
+        id: it.id,
+        filename: it.filename,
+        contentType: it.contentType,
+        status: it.tooBig ? ("error" as const) : ("uploading" as const),
+        error: it.tooBig ? "over 20 MB" : undefined,
+      })),
+    ]);
+
+    // A document's chat_id FK needs the chat row to exist before we insert it.
+    try {
+      await useChatStore.getState().ensureChatPersisted(convId);
+    } catch {
+      /* per-file errors are handled below */
+    }
+
+    for (const it of items) {
+      if (it.tooBig) continue;
+      try {
+        const created = await createDocument(
+          it.id,
+          convId,
+          it.filename,
+          it.contentType,
+          it.file.size,
+        );
+        const uploaded = created ? await uploadOriginal(it.id, it.file) : false;
+        if (!uploaded) {
+          patch(it.id, { status: "error", error: "upload failed" });
+          void setDocumentStatus(it.id, "error", "upload failed");
+          continue;
+        }
+        patch(it.id, { status: "processing" });
+        void setDocumentStatus(it.id, "processing");
+        const res = await requestParse(it.id, it.filename, it.contentType);
+        patch(it.id, { status: res.status, error: res.error });
+        void setDocumentStatus(it.id, res.status, res.error);
+      } catch (e) {
+        patch(it.id, {
+          status: "error",
+          error: e instanceof Error ? e.message : "failed",
+        });
       }
-      setPending((prev) => [...prev, base]);
-      const created = await createDocument(id, convId, file.name, contentType, file.size);
-      const uploaded = created ? await uploadOriginal(id, file) : false;
-      if (!uploaded) {
-        patch(id, { status: "error", error: "upload failed" });
-        void setDocumentStatus(id, "error", "upload failed");
-        continue;
-      }
-      patch(id, { status: "processing" });
-      void setDocumentStatus(id, "processing");
-      const res = await requestParse(id, file.name, contentType);
-      patch(id, { status: res.status, error: res.error });
-      void setDocumentStatus(id, res.status, res.error);
     }
   }
 
@@ -160,7 +192,15 @@ export function ChatInput({ onSend, isStreaming = false, onStop }: ChatInputProp
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start" side="top">
-                <DropdownMenuItem onSelect={() => fileRef.current?.click()}>
+                <DropdownMenuItem
+                  onSelect={(e) => {
+                    // Radix closes the menu + restores focus on select; opening the
+                    // native file picker synchronously here is unreliable (the click
+                    // lands mid-teardown). Defer it to the next tick so it opens.
+                    e.preventDefault();
+                    setTimeout(() => fileRef.current?.click(), 0);
+                  }}
+                >
                   <Upload className="mr-2 size-4" />
                   Upload Docs
                 </DropdownMenuItem>
