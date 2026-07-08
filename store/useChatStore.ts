@@ -23,6 +23,22 @@ interface ChatStore {
   newConversation: () => void;
   selectConversation: (id: string) => void;
   appendMessage: (conversationId: string, message: Message) => void;
+  // Streaming assistant lifecycle (single source of truth): the in-flight reply
+  // lives in the store, so switching conversations mid-stream never loses it (C-2).
+  /** Add an empty assistant message to stream into (no persist yet). */
+  beginAssistantMessage: (conversationId: string, message: Message) => void;
+  /** Patch a message's content in place while streaming (no persist). */
+  patchMessageContent: (
+    conversationId: string,
+    messageId: string,
+    content: string,
+  ) => void;
+  /** Set the final content and persist once, when the stream completes. */
+  finalizeAssistantMessage: (
+    conversationId: string,
+    messageId: string,
+    content: string,
+  ) => void;
   /** Remove a chat from Recent (hides it in the DB; conversation data is kept). */
   hideConversation: (id: string) => void;
   /** Apply an (LLM-generated) title: update state, flag titled, persist via RLS. */
@@ -152,6 +168,53 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     // Persist this turn (best-effort, serialized per conversation).
     const conv = get().conversations.find((c) => c.id === conversationId);
     if (conv) persistTurn(conversationId, conv.title, message);
+  },
+
+  beginAssistantMessage: (conversationId, message) => {
+    // Placeholder for the streaming reply — added to the store (the single feed
+    // source) but NOT persisted; finalizeAssistantMessage persists once at the end.
+    set((state) => ({
+      conversations: state.conversations.map((c) =>
+        c.id === conversationId
+          ? { ...c, messages: [...c.messages, message], updatedAt: Date.now() }
+          : c,
+      ),
+    }));
+  },
+
+  patchMessageContent: (conversationId, messageId, content) => {
+    set((state) => ({
+      conversations: state.conversations.map((c) =>
+        c.id === conversationId
+          ? {
+              ...c,
+              messages: c.messages.map((m) =>
+                m.id === messageId ? { ...m, content } : m,
+              ),
+            }
+          : c,
+      ),
+    }));
+  },
+
+  finalizeAssistantMessage: (conversationId, messageId, content) => {
+    set((state) => ({
+      conversations: state.conversations.map((c) =>
+        c.id === conversationId
+          ? {
+              ...c,
+              messages: c.messages.map((m) =>
+                m.id === messageId ? { ...m, content } : m,
+              ),
+              updatedAt: Date.now(),
+              persisted: true,
+            }
+          : c,
+      ),
+    }));
+    const conv = get().conversations.find((c) => c.id === conversationId);
+    const msg = conv?.messages.find((m) => m.id === messageId);
+    if (conv && msg) persistTurn(conversationId, conv.title, msg);
   },
 
   setConversationTitle: (id, title) => {

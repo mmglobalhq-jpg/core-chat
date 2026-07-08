@@ -240,3 +240,49 @@ describe("appendMessage (FR-013/FR-014)", () => {
   });
 });
 
+
+describe("streaming assistant lifecycle (single source of truth / C-2)", () => {
+  const asst = (id: string, content = ""): Message => ({
+    id,
+    role: "assistant",
+    content,
+    createdAt: 0,
+  });
+
+  it("begin adds an empty assistant message (no persist)", () => {
+    const id = useChatStore.getState().conversations[0].id;
+    useChatStore.getState().beginAssistantMessage(id, asst("a1"));
+    const conv = useChatStore.getState().conversations.find((c) => c.id === id)!;
+    expect(conv.messages.some((m) => m.id === "a1")).toBe(true);
+  });
+
+  it("patch updates the streaming content in place", () => {
+    const id = useChatStore.getState().conversations[0].id;
+    useChatStore.getState().beginAssistantMessage(id, asst("a1"));
+    useChatStore.getState().patchMessageContent(id, "a1", "Hel");
+    useChatStore.getState().patchMessageContent(id, "a1", "Hello");
+    const msg = useChatStore
+      .getState()
+      .conversations.find((c) => c.id === id)!
+      .messages.find((m) => m.id === "a1");
+    expect(msg?.content).toBe("Hello");
+  });
+
+  it("finalize sets the final content and marks the conversation persisted", () => {
+    const id = useChatStore.getState().conversations[0].id;
+    useChatStore.getState().beginAssistantMessage(id, asst("a1"));
+    useChatStore.getState().finalizeAssistantMessage(id, "a1", "Done");
+    const conv = useChatStore.getState().conversations.find((c) => c.id === id)!;
+    expect(conv.messages.find((m) => m.id === "a1")?.content).toBe("Done");
+    expect(conv.persisted).toBe(true);
+  });
+
+  it("keeps an in-flight reply in its own conversation across a switch (C-2)", () => {
+    const [a, b] = useChatStore.getState().conversations;
+    useChatStore.getState().beginAssistantMessage(a.id, asst("a1"));
+    useChatStore.getState().patchMessageContent(a.id, "a1", "streaming...");
+    useChatStore.getState().selectConversation(b.id); // switch away mid-stream
+    const convA = useChatStore.getState().conversations.find((c) => c.id === a.id)!;
+    expect(convA.messages.find((m) => m.id === "a1")?.content).toBe("streaming...");
+  });
+});

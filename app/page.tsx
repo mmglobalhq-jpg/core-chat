@@ -1,7 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useChat } from "@ai-sdk/react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Message as UIMessage } from "ai";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
@@ -35,25 +34,30 @@ function toUIMessage(message: Message): UIMessage {
   return { id: message.id, role: message.role, content: message.content };
 }
 
+// Stable empty-array reference so the feed selector doesn't re-render when there
+// is no active conversation (a fresh `[]` each call would break memoization).
+const EMPTY_MESSAGES: Message[] = [];
+
 export default function Home() {
   const activeConversationId = useChatStore((s) => s.activeConversationId);
-  const conversations = useChatStore((s) => s.conversations);
-  const appendMessage = useChatStore((s) => s.appendMessage);
   const selectedModelId = useChatStore((s) => s.selectedModelId);
 
   // Load this user's persisted chats on mount + on sign-in/out (per-user history).
   useChatSync();
 
-  const { messages, setMessages } = useChat({
-    id: activeConversationId ?? "new",
-  });
-
-  const activeConversation = conversations.find(
-    (c) => c.id === activeConversationId,
+  // The feed is a pure projection of the active conversation's messages in the
+  // store (single source of truth). Streaming writes into the store too, so a
+  // conversation switch mid-stream can never orphan the in-flight reply (C-2),
+  // and no reconciliation effect / dual-write is needed.
+  const activeMessages = useChatStore(
+    (s) =>
+      s.conversations.find((c) => c.id === s.activeConversationId)?.messages ??
+      EMPTY_MESSAGES,
   );
-  // Re-run the feed hydration when a persisted conversation finishes loading its
-  // messages (loaded flips false→true), not just when the id changes.
-  const activeLoaded = activeConversation?.loaded ?? false;
+  const messages = useMemo(
+    () => activeMessages.map(toUIMessage),
+    [activeMessages],
+  );
 
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -67,122 +71,89 @@ export default function Home() {
     abortRef.current?.abort();
   }, []);
 
-  // Hydrate the feed from the store whenever the active conversation changes
-  // (FR-007 clears, FR-008 loads). Intentionally keyed on the id only so live
-  // sends within a conversation are not clobbered.
+  // Close the mobile sidebar when switching conversations.
   useEffect(() => {
-    const conversation = conversations.find(
-      (c) => c.id === activeConversationId,
-    );
-    setMessages((conversation?.messages ?? []).map(toUIMessage));
     setMobileOpen(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeConversationId, activeLoaded]);
+  }, [activeConversationId]);
 
   const handleSend = useCallback(
     (text: string) => {
       const conversationId = activeConversationId;
       if (!conversationId) return;
+      const store = useChatStore.getState();
 
       // Prior, already-completed turns of THIS conversation — sent to the backend
-      // so the agent has context when continuing a reopened (or live) chat. Read
-      // from the store to capture committed history, excluding the message we're
-      // about to add (which travels as the request's raw_input) and any in-flight
-      // streaming bubble.
+      // so the agent has context when continuing a reopened (or live) chat.
       const priorHistory = (
-        useChatStore.getState().conversations.find((c) => c.id === conversationId)
-          ?.messages ?? []
+        store.conversations.find((c) => c.id === conversationId)?.messages ?? []
       ).map((m) => ({ role: m.role, content: m.content }));
 
-      const userMessage: Message = {
+      // User turn: append + persist immediately (optimistic).
+      store.appendMessage(conversationId, {
         id: createId("user"),
         role: "user",
         content: text,
         createdAt: Date.now(),
-      };
-      setMessages((prev) => [...prev, toUIMessage(userMessage)]);
-      appendMessage(conversationId, userMessage);
+      });
 
-      // Live streamed reply from the backend gateway (via the /api/intent SSE
-      // proxy). Append an empty assistant bubble immediately, then append each
-      // token fragment to that message's content as it arrives. The finished
-      // reply is persisted to the store once the stream completes; a failure
-      // degrades the bubble to an inline error rather than throwing.
+      // Assistant turn: an empty placeholder in the store to stream into; patched
+      // per token; finalized (final content + single persist) when the stream ends.
       const assistantId = createId("assistant");
-      const patchContent = (content: string) =>
-        setMessages((prev) =>
-          prev.map((m) => (m.id === assistantId ? { ...m, content } : m)),
-        );
-
-      setMessages((prev) => [
-        ...prev,
-        { id: assistantId, role: "assistant", content: "" },
-      ]);
+      store.beginAssistantMessage(conversationId, {
+        id: assistantId,
+        role: "assistant",
+        content: "",
+        createdAt: Date.now(),
+      });
 
       const controller = new AbortController();
       abortRef.current = controller;
       setIsStreaming(true);
 
       let streamed = "";
+      const finalize = (content: string) =>
+        useChatStore
+          .getState()
+          .finalizeAssistantMessage(conversationId, assistantId, content);
+
       sendChat(
         text,
         selectedModelId,
         (token) => {
           streamed += token;
-          patchContent(streamed);
+          useChatStore
+            .getState()
+            .patchMessageContent(conversationId, assistantId, streamed);
         },
         controller.signal,
         priorHistory,
       )
         .then((result) => {
-          // No tokens streamed -> surface the status (degraded run) or a stop
-          // notice instead of leaving a blank bubble.
-          const content =
+          finalize(
             streamed ||
-            result.reply ||
-            (result.status === "aborted"
-              ? "⏹ Generation stopped."
-              : `⚠️ No reply produced (status: ${result.status}).`);
-          patchContent(content);
-          appendMessage(conversationId, {
-            id: assistantId,
-            role: "assistant",
-            content,
-            createdAt: Date.now(),
-          });
+              result.reply ||
+              (result.status === "aborted"
+                ? "⏹ Generation stopped."
+                : `⚠️ No reply produced (status: ${result.status}).`),
+          );
           maybeAutoTitle(conversationId);
         })
         .catch((err: unknown) => {
-          // A Stop before any response arrives rejects the fetch; that is a
-          // clean cancellation, not a backend error.
-          if (controller.signal.aborted) {
-            const content = streamed || "⏹ Generation stopped.";
-            patchContent(content);
-            appendMessage(conversationId, {
-              id: assistantId,
-              role: "assistant",
-              content,
-              createdAt: Date.now(),
-            });
-            return;
-          }
-          const content = `⚠️ Could not reach the backend: ${
-            err instanceof Error ? err.message : String(err)
-          }`;
-          patchContent(content);
-          appendMessage(conversationId, {
-            id: assistantId,
-            role: "assistant",
-            content,
-            createdAt: Date.now(),
-          });
+          // A Stop before any response arrives rejects the fetch — clean cancel.
+          finalize(
+            controller.signal.aborted
+              ? streamed || "⏹ Generation stopped."
+              : `⚠️ Could not reach the backend: ${
+                  err instanceof Error ? err.message : String(err)
+                }`,
+          );
         })
         .finally(() => {
           if (abortRef.current === controller) abortRef.current = null;
           setIsStreaming(false);
         });
     },
-    [activeConversationId, appendMessage, setMessages, selectedModelId],
+    [activeConversationId, selectedModelId],
   );
 
   return (
