@@ -16,6 +16,23 @@ export interface ChatResult {
 }
 
 /**
+ * Same-origin JSON headers plus the active user's Supabase Bearer JWT, so the
+ * proxy can forward identity to the backend. Absent a session the call proceeds
+ * unauthenticated (the backend treats it as the sandbox user). Shared by every
+ * client→proxy call so the session/header logic lives in one place.
+ */
+export async function authHeaders(): Promise<Record<string, string>> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  if (session?.access_token) {
+    headers.Authorization = `Bearer ${session.access_token}`;
+  }
+  return headers;
+}
+
+/**
  * Ask the backend (local model) for a short title summarizing a conversation.
  * Best-effort: returns null on any failure so the caller keeps its current title.
  * Forwards the Supabase session JWT so the same-origin proxy can clear the edge.
@@ -24,15 +41,9 @@ export async function generateTitle(
   messages: { role: string; content: string }[],
 ): Promise<string | null> {
   try {
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-    if (session?.access_token) headers.Authorization = `Bearer ${session.access_token}`;
-
     const res = await fetch("/api/title", {
       method: "POST",
-      headers,
+      headers: await authHeaders(),
       body: JSON.stringify({ messages }),
     });
     if (!res.ok) return null;
@@ -50,21 +61,9 @@ export async function sendChat(
   signal?: AbortSignal,
   history?: { role: string; content: string }[],
 ): Promise<ChatResult> {
-  // Attach the active user's Supabase session JWT so the proxy can forward it as
-  // `Authorization: Bearer <token>` to the backend, which verifies it and resolves
-  // the real user_id. Absent a session the call proceeds unauthenticated (the
-  // backend then treats it as the sandbox user).
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-  if (session?.access_token) {
-    headers.Authorization = `Bearer ${session.access_token}`;
-  }
-
   const res = await fetch("/api/intent", {
     method: "POST",
-    headers,
+    headers: await authHeaders(),
     // `history` carries prior conversation turns so the backend can seed the
     // agent with context (see /api/intent proxy + IntentPayload.history).
     body: JSON.stringify({ text, model, history }),
