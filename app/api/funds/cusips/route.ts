@@ -21,10 +21,17 @@ export async function GET(request: Request) {
   const gate = await requireAdmin(request);
   if ("error" in gate) return gate.error;
 
-  const { data, error } = await getSupabaseAdmin().rpc("export_cusips");
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-
-  const rows = (data ?? []) as CusipRow[];
+  // PostgREST caps a response at 1000 rows, so page through the full set.
+  const db = getSupabaseAdmin();
+  const CHUNK = 1000;
+  const rows: CusipRow[] = [];
+  for (let from = 0; ; from += CHUNK) {
+    const { data, error } = await db.rpc("export_cusips").range(from, from + CHUNK - 1);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    const batch = (data ?? []) as CusipRow[];
+    rows.push(...batch);
+    if (batch.length < CHUNK) break;
+  }
   const lines = ["cusip,description,security_type"];
   for (const r of rows) {
     lines.push([csv(r.cusip), csv(r.description), csv(r.security_type)].join(","));
