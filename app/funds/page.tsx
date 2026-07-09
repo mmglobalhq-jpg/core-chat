@@ -114,6 +114,7 @@ const COLUMNS: { key: string; label: string; align: "left" | "right"; w: number 
   { key: "cohort", label: "COHORT", align: "left", w: 120 },
   { key: "sec_type", label: "SEC TYPE", align: "left", w: 100 },
 ];
+const WIDTHS_KEY = "funds:colWidths";
 
 function addDays(iso: string, n: number): string {
   const [y, m, d] = iso.split("-").map(Number);
@@ -378,6 +379,16 @@ export default function FundsPage() {
       .catch(() => setError("Failed to load managers/funds."));
   }, []);
 
+  // Restore saved column widths (client-only, after mount).
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(WIDTHS_KEY) || "{}");
+      if (saved && typeof saved === "object") setWidths((w) => ({ ...w, ...saved }));
+    } catch {
+      /* ignore malformed storage */
+    }
+  }, []);
+
   // Debounce free-text filters so we don't fetch on every keystroke.
   useEffect(() => {
     const t = setTimeout(() => setDebFilters(filters), 350);
@@ -452,6 +463,15 @@ export default function FundsPage() {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
       document.body.style.cursor = "";
+      // Persist the final widths so they're remembered next time.
+      setWidths((w) => {
+        try {
+          localStorage.setItem(WIDTHS_KEY, JSON.stringify(w));
+        } catch {
+          /* ignore */
+        }
+        return w;
+      });
     };
     document.body.style.cursor = "col-resize";
     window.addEventListener("mousemove", onMove);
@@ -541,8 +561,8 @@ export default function FundsPage() {
       </header>
 
       <div className="flex min-h-0 flex-1 flex-col">
-        {/* Controls (30%) */}
-        <section className="h-[30%] shrink-0 overflow-auto border-b border-border p-4">
+        {/* Controls (20%) */}
+        <section className="h-[20%] shrink-0 overflow-auto border-b border-border p-4">
           <div className="flex flex-wrap items-end gap-4">
             <Field label="Fund Manager" className="w-56">
               <select
@@ -606,8 +626,8 @@ export default function FundsPage() {
           </p>
         </section>
 
-        {/* Table (70%) */}
-        <section className="flex h-[70%] min-h-0 flex-col">
+        {/* Table (80%) */}
+        <section className="flex h-[80%] min-h-0 flex-col">
           <div className="min-h-0 flex-1 overflow-auto">
             <table
               className="table-fixed border-collapse text-sm [&_tbody_td]:overflow-hidden [&_tbody_td]:text-ellipsis [&_tbody_td]:whitespace-nowrap"
