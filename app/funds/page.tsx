@@ -185,9 +185,11 @@ export default function FundsPage() {
       document.body.appendChild(a);
       a.click();
       a.remove();
-      URL.revokeObjectURL(url);
-    } catch {
-      setError("CUSIP export failed.");
+      // Revoke later — revoking the object URL synchronously right after click
+      // can abort the download in some browsers.
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    } catch (e) {
+      setError(`CUSIP export failed${e instanceof Error ? ` (${e.message})` : ""}.`);
     } finally {
       setExporting(false);
     }
