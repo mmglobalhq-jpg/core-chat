@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { LogOut, PanelLeftClose, Plus, ShieldCheck, X } from "lucide-react";
+import { BarChart3, LogOut, PanelLeftClose, Plus, ShieldCheck, X } from "lucide-react";
 import {
   Sheet,
   SheetContent,
@@ -174,8 +174,23 @@ function SidebarBody({
         </div>
       </ScrollArea>
 
-      {/* Bottom: settings + theme toggle pinned (FR-004, FR-020). */}
+      {/* Apps: links to the app pages — its own box, above settings. */}
       <div className="mt-auto border-t border-sidebar-border p-2">
+        <p className="px-2 py-1 text-xs font-medium text-muted-foreground">Apps</p>
+        <Button
+          asChild
+          variant="ghost"
+          className="w-full justify-start gap-2 text-sidebar-foreground"
+        >
+          <Link href="/funds">
+            <BarChart3 className="size-4" />
+            <span className="text-sm">Funds</span>
+          </Link>
+        </Button>
+      </div>
+
+      {/* Bottom: settings + theme toggle pinned (FR-004, FR-020). */}
+      <div className="border-t border-sidebar-border p-2">
         <ThemeToggle />
         {/* Admin panel — only for is_admin users (UX gate; routes enforce it too). */}
         {isAdmin && (
