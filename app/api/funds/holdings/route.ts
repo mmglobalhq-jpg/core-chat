@@ -63,6 +63,12 @@ export async function GET(request: Request) {
   const fChange = searchParams.get("f_change") || null;
   const fParMin = searchParams.get("f_par_min");
   const fParMax = searchParams.get("f_par_max");
+  const fCpnMin = searchParams.get("f_cpn_min");
+  const fWamMin = searchParams.get("f_wam_min");
+  const fWalaMin = searchParams.get("f_wala_min");
+  const fGenTicker = searchParams.get("f_gen_ticker") || null;
+  const fCohort = searchParams.get("f_cohort") || null;
+  const fSecType = searchParams.get("f_sec_type") || null;
 
   const db = getSupabaseAdmin();
 
@@ -86,6 +92,12 @@ export async function GET(request: Request) {
       p_change_type: fChange,
       p_par_min: fParMin ? Number(fParMin) : null,
       p_par_max: fParMax ? Number(fParMax) : null,
+      p_cpn_min: fCpnMin ? Number(fCpnMin) : null,
+      p_wam_min: fWamMin ? Number(fWamMin) : null,
+      p_wala_min: fWalaMin ? Number(fWalaMin) : null,
+      p_gen_ticker: fGenTicker,
+      p_cohort: fCohort,
+      p_sec_type: fSecType,
       p_sort: sort,
       p_dir: dir,
       p_limit: PAGE_SIZE,
@@ -148,6 +160,12 @@ export async function GET(request: Request) {
   if (fChange) q = q.eq("change_type", fChange);
   if (fParMin) q = q.gte("par_value", Number(fParMin));
   if (fParMax) q = q.lte("par_value", Number(fParMax));
+  if (fCpnMin) q = q.gte("cpn", Number(fCpnMin));
+  if (fWamMin) q = q.gte("wam", Number(fWamMin));
+  if (fWalaMin) q = q.gte("wala", Number(fWalaMin));
+  if (fGenTicker) q = q.ilike("gen_ticker", `%${fGenTicker}%`);
+  if (fCohort) q = q.ilike("cohort", `%${fCohort}%`);
+  if (fSecType) q = q.ilike("sec_type", `%${fSecType}%`);
 
   const { data, error, count } = await q;
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
