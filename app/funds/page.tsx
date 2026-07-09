@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -10,6 +10,7 @@ import {
   ChevronsUpDown,
   ChevronUp,
   Download,
+  Upload,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
@@ -38,6 +39,12 @@ type Row = {
   par_value: number | null;
   par_change: number | null;
   change_type: string | null;
+  cpn: number | null;
+  wam: number | null;
+  wala: number | null;
+  gen_ticker: string | null;
+  cohort: string | null;
+  sec_type: string | null;
 };
 type SortDir = "asc" | "desc";
 type Filters = {
@@ -83,6 +90,83 @@ function addDays(iso: string, n: number): string {
   const dt = new Date(Date.UTC(y, m - 1, d));
   dt.setUTCDate(dt.getUTCDate() + n);
   return dt.toISOString().slice(0, 10);
+}
+
+type EnrichRow = {
+  cusip: string;
+  security_des: string | null;
+  cpn: number | null;
+  wam: number | null;
+  wala: number | null;
+  gen_ticker: string | null;
+  cohort: string | null;
+  sec_type: string | null;
+};
+
+// Minimal robust CSV parser — handles quoted fields (embedded commas/quotes/newlines).
+function parseCsv(text: string): string[][] {
+  const rows: string[][] = [];
+  let field = "";
+  let row: string[] = [];
+  let inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (text[i + 1] === '"') { field += '"'; i++; } else inQuotes = false;
+      } else field += c;
+    } else if (c === '"') inQuotes = true;
+    else if (c === ",") { row.push(field); field = ""; }
+    else if (c === "\n") { row.push(field); rows.push(row); row = []; field = ""; }
+    else if (c !== "\r") field += c;
+  }
+  if (field !== "" || row.length > 0) { row.push(field); rows.push(row); }
+  return rows.filter((r) => r.some((c) => c.trim() !== ""));
+}
+
+const cell = (cells: string[], i: number | undefined) => (i === undefined ? "" : (cells[i] ?? "").trim());
+const numOrNull = (s: string): number | null => {
+  if (s === "") return null;
+  const n = Number(s.replace(/[, ]/g, ""));
+  return Number.isFinite(n) ? n : null;
+};
+
+/** Parse the enrichment CSV, mapping its headers to the enrichment fields. */
+function csvToEnrichRows(text: string): EnrichRow[] {
+  const rows = parseCsv(text);
+  if (rows.length < 2) return [];
+  const H = rows[0].map((h) => h.trim().toUpperCase());
+  const at = (name: string) => {
+    const i = H.indexOf(name);
+    return i === -1 ? undefined : i;
+  };
+  const c = {
+    cusip: at("CUSIP"),
+    des: at("SECURITY_DES"),
+    cpn: at("CPN"),
+    wam: at("MTG_WAM"),
+    wala: at("MTG_WALA_CALC"),
+    tkr: at("MTG_GEN_TICKER"),
+    coh: at("SPEC_COHORT_WATERFALL"),
+    typ: at("SECURITY_TYP"),
+  };
+  if (c.cusip === undefined) return [];
+  const out: EnrichRow[] = [];
+  for (let r = 1; r < rows.length; r++) {
+    const cusip = cell(rows[r], c.cusip);
+    if (!cusip) continue;
+    out.push({
+      cusip,
+      security_des: cell(rows[r], c.des) || null,
+      cpn: numOrNull(cell(rows[r], c.cpn)),
+      wam: numOrNull(cell(rows[r], c.wam)),
+      wala: numOrNull(cell(rows[r], c.wala)),
+      gen_ticker: cell(rows[r], c.tkr) || null,
+      cohort: cell(rows[r], c.coh) || null,
+      sec_type: cell(rows[r], c.typ) || null,
+    });
+  }
+  return out;
 }
 
 /** Themed labeled control wrapper. */
@@ -164,6 +248,41 @@ export default function FundsPage() {
 
   const isAdmin = useIsAdmin();
   const [exporting, setExporting] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importMsg, setImportMsg] = useState<string | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Admin-only: parse an enrichment CSV client-side and upsert it by CUSIP, then
+  // re-fetch so the enriched columns show for matched positions.
+  async function importData(file: File) {
+    setImporting(true);
+    setError(null);
+    setImportMsg(null);
+    try {
+      const rows = csvToEnrichRows(await file.text());
+      if (rows.length === 0) throw new Error("no rows / missing CUSIP column");
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const res = await fetch("/api/funds/import", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session?.access_token ?? ""}`,
+        },
+        body: JSON.stringify({ rows }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error ?? String(res.status));
+      setImportMsg(`Imported ${body.imported} CUSIPs.`);
+      setRefreshKey((k) => k + 1);
+    } catch (e) {
+      setError(`Import failed${e instanceof Error ? ` (${e.message})` : ""}.`);
+    } finally {
+      setImporting(false);
+    }
+  }
 
   // Admin-only: download every distinct CUSIP as a CSV. Sends the caller's
   // Supabase access token so the route's requireAdmin gate passes.
@@ -258,7 +377,7 @@ export default function FundsPage() {
       })
       .finally(() => setLoading(false));
     return () => ctrl.abort();
-  }, [managerId, fundId, page, sort, dir, customRange, startDate, endDate, debFilters]);
+  }, [managerId, fundId, page, sort, dir, customRange, startDate, endDate, debFilters, refreshKey]);
 
   function toggleSort(col: string) {
     if (sort === col) setDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -309,17 +428,41 @@ export default function FundsPage() {
         <h1 className="text-base font-medium">Fund Holdings</h1>
         <div className="ml-auto flex items-center gap-2">
           {isAdmin && (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="gap-1.5"
-              onClick={exportCusips}
-              disabled={exporting}
-            >
-              <Download className="size-4" />
-              {exporting ? "Exporting…" : "Export Cusips"}
-            </Button>
+            <>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".csv,text/csv"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) importData(f);
+                  e.target.value = "";
+                }}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={importing}
+              >
+                <Upload className="size-4" />
+                {importing ? "Importing…" : "Import Data"}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                onClick={exportCusips}
+                disabled={exporting}
+              >
+                <Download className="size-4" />
+                {exporting ? "Exporting…" : "Export Cusips"}
+              </Button>
+            </>
           )}
           <ThemeToggle />
         </div>
@@ -387,6 +530,7 @@ export default function FundsPage() {
             {customRange
               ? `Range: ${startDate} → ${endDate}.`
               : "Default: latest 1-day change vs each fund's previous snapshot (only when it's within ~2 weeks; funds with no recent prior snapshot show no change)."}
+            {importMsg && <span className="ml-1 font-medium text-foreground">{importMsg}</span>}
           </p>
         </section>
 
@@ -404,6 +548,12 @@ export default function FundsPage() {
                   <SortHeader col="par_value" label="Par Value" sort={sort} dir={dir} onSort={toggleSort} align="right" />
                   <SortHeader col="par_change" label="Par Change" sort={sort} dir={dir} onSort={toggleSort} align="right" />
                   <SortHeader col="change_type" label="Change" sort={sort} dir={dir} onSort={toggleSort} />
+                  <SortHeader col="cpn" label="CPN" sort={sort} dir={dir} onSort={toggleSort} align="right" />
+                  <SortHeader col="wam" label="WAM" sort={sort} dir={dir} onSort={toggleSort} align="right" />
+                  <SortHeader col="wala" label="WALA" sort={sort} dir={dir} onSort={toggleSort} align="right" />
+                  <SortHeader col="gen_ticker" label="TICKER" sort={sort} dir={dir} onSort={toggleSort} />
+                  <SortHeader col="cohort" label="COHORT" sort={sort} dir={dir} onSort={toggleSort} />
+                  <SortHeader col="sec_type" label="SEC TYPE" sort={sort} dir={dir} onSort={toggleSort} />
                 </tr>
                 {/* Filter row */}
                 <tr className="border-t border-border bg-background/60">
@@ -441,6 +591,12 @@ export default function FundsPage() {
                       ))}
                     </select>
                   </td>
+                  <td className="px-2 py-1" />
+                  <td className="px-2 py-1" />
+                  <td className="px-2 py-1" />
+                  <td className="px-2 py-1" />
+                  <td className="px-2 py-1" />
+                  <td className="px-2 py-1" />
                 </tr>
               </thead>
               <tbody>
@@ -462,11 +618,17 @@ export default function FundsPage() {
                       {fmtChange(r.par_change)}
                     </td>
                     <td className={cn("px-3 py-1.5", r.change_type ? CHANGE_COLOR[r.change_type] : "")}>{r.change_type ?? ""}</td>
+                    <td className="px-3 py-1.5 text-right font-mono tabular-nums">{r.cpn ?? ""}</td>
+                    <td className="px-3 py-1.5 text-right font-mono tabular-nums">{r.wam ?? ""}</td>
+                    <td className="px-3 py-1.5 text-right font-mono tabular-nums">{r.wala ?? ""}</td>
+                    <td className="px-3 py-1.5 font-mono">{r.gen_ticker ?? ""}</td>
+                    <td className="px-3 py-1.5">{r.cohort ?? ""}</td>
+                    <td className="px-3 py-1.5">{r.sec_type ?? ""}</td>
                   </tr>
                 ))}
                 {!loading && rows.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="px-3 py-10 text-center text-muted-foreground">
+                    <td colSpan={14} className="px-3 py-10 text-center text-muted-foreground">
                       {error ?? "No holdings for this selection."}
                     </td>
                   </tr>
