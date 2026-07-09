@@ -55,6 +55,12 @@ type Filters = {
   change_type: string;
   par_min: string;
   par_max: string;
+  cpn_min: string;
+  wam_min: string;
+  wala_min: string;
+  gen_ticker: string;
+  cohort: string;
+  sec_type: string;
 };
 const EMPTY_FILTERS: Filters = {
   ticker: "",
@@ -64,6 +70,12 @@ const EMPTY_FILTERS: Filters = {
   change_type: "",
   par_min: "",
   par_max: "",
+  cpn_min: "",
+  wam_min: "",
+  wala_min: "",
+  gen_ticker: "",
+  cohort: "",
+  sec_type: "",
 };
 
 const money = new Intl.NumberFormat("en-US", {
@@ -363,6 +375,12 @@ export default function FundsPage() {
     if (debFilters.change_type) qs.set("f_change", debFilters.change_type);
     if (debFilters.par_min) qs.set("f_par_min", debFilters.par_min);
     if (debFilters.par_max) qs.set("f_par_max", debFilters.par_max);
+    if (debFilters.cpn_min) qs.set("f_cpn_min", debFilters.cpn_min);
+    if (debFilters.wam_min) qs.set("f_wam_min", debFilters.wam_min);
+    if (debFilters.wala_min) qs.set("f_wala_min", debFilters.wala_min);
+    if (debFilters.gen_ticker) qs.set("f_gen_ticker", debFilters.gen_ticker);
+    if (debFilters.cohort) qs.set("f_cohort", debFilters.cohort);
+    if (debFilters.sec_type) qs.set("f_sec_type", debFilters.sec_type);
 
     fetch(`/api/funds/holdings?${qs}`, { signal: ctrl.signal })
       .then((r) => r.json())
@@ -591,12 +609,30 @@ export default function FundsPage() {
                       ))}
                     </select>
                   </td>
-                  <td className="px-2 py-1" />
-                  <td className="px-2 py-1" />
-                  <td className="px-2 py-1" />
-                  <td className="px-2 py-1" />
-                  <td className="px-2 py-1" />
-                  <td className="px-2 py-1" />
+                  <td className="px-2 py-1">
+                    <input className={cn(filterCls, "text-right")} placeholder="≥" inputMode="decimal"
+                      value={filters.cpn_min} onChange={(e) => setF({ cpn_min: e.target.value.replace(/[^0-9.]/g, "") })} />
+                  </td>
+                  <td className="px-2 py-1">
+                    <input className={cn(filterCls, "text-right")} placeholder="≥" inputMode="decimal"
+                      value={filters.wam_min} onChange={(e) => setF({ wam_min: e.target.value.replace(/[^0-9.]/g, "") })} />
+                  </td>
+                  <td className="px-2 py-1">
+                    <input className={cn(filterCls, "text-right")} placeholder="≥" inputMode="decimal"
+                      value={filters.wala_min} onChange={(e) => setF({ wala_min: e.target.value.replace(/[^0-9.]/g, "") })} />
+                  </td>
+                  <td className="px-2 py-1">
+                    <input className={filterCls} placeholder="filter"
+                      value={filters.gen_ticker} onChange={(e) => setF({ gen_ticker: e.target.value })} />
+                  </td>
+                  <td className="px-2 py-1">
+                    <input className={filterCls} placeholder="filter"
+                      value={filters.cohort} onChange={(e) => setF({ cohort: e.target.value })} />
+                  </td>
+                  <td className="px-2 py-1">
+                    <input className={filterCls} placeholder="filter"
+                      value={filters.sec_type} onChange={(e) => setF({ sec_type: e.target.value })} />
+                  </td>
                 </tr>
               </thead>
               <tbody>
