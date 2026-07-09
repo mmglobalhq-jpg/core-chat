@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -96,6 +96,24 @@ const CHANGE_COLOR: Record<string, string> = {
   Old: "text-amber-600 dark:text-amber-400",
   Unchanged: "text-muted-foreground",
 };
+
+// Table columns (order + default widths). Widths are user-resizable at runtime.
+const COLUMNS: { key: string; label: string; align: "left" | "right"; w: number }[] = [
+  { key: "ticker", label: "Fund", align: "left", w: 90 },
+  { key: "as_of_date", label: "Date", align: "left", w: 108 },
+  { key: "cusip", label: "Cusip", align: "left", w: 104 },
+  { key: "description", label: "Description", align: "left", w: 260 },
+  { key: "security_type", label: "Type", align: "left", w: 76 },
+  { key: "par_value", label: "Par Value", align: "right", w: 116 },
+  { key: "par_change", label: "Par Change", align: "right", w: 120 },
+  { key: "change_type", label: "Change", align: "left", w: 96 },
+  { key: "cpn", label: "CPN", align: "right", w: 76 },
+  { key: "wam", label: "WAM", align: "right", w: 76 },
+  { key: "wala", label: "WALA", align: "right", w: 80 },
+  { key: "gen_ticker", label: "TICKER", align: "left", w: 104 },
+  { key: "cohort", label: "COHORT", align: "left", w: 120 },
+  { key: "sec_type", label: "SEC TYPE", align: "left", w: 100 },
+];
 
 function addDays(iso: string, n: number): string {
   const [y, m, d] = iso.split("-").map(Number);
@@ -203,6 +221,7 @@ function SortHeader({
   sort,
   dir,
   onSort,
+  onResizeStart,
   align = "left",
 }: {
   col: string;
@@ -210,23 +229,37 @@ function SortHeader({
   sort: string;
   dir: SortDir;
   onSort: (col: string) => void;
+  onResizeStart?: (col: string, e: ReactMouseEvent) => void;
   align?: "left" | "right";
 }) {
   const active = sort === col;
   return (
-    <th className={cn("px-3 py-2 font-medium", align === "right" && "text-right")}>
+    <th className={cn("relative overflow-hidden px-3 py-2 font-medium", align === "right" && "text-right")}>
       <button
         type="button"
         onClick={() => onSort(col)}
-        className={cn("inline-flex items-center gap-1 hover:text-foreground", align === "right" && "flex-row-reverse")}
+        className={cn(
+          "inline-flex max-w-full items-center gap-1 truncate hover:text-foreground",
+          align === "right" && "flex-row-reverse",
+        )}
       >
         {label}
         {active ? (
-          dir === "asc" ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />
+          dir === "asc" ? <ChevronUp className="size-3.5 shrink-0" /> : <ChevronDown className="size-3.5 shrink-0" />
         ) : (
-          <ChevronsUpDown className="size-3.5 opacity-40" />
+          <ChevronsUpDown className="size-3.5 shrink-0 opacity-40" />
         )}
       </button>
+      {/* Drag the right edge to resize this column. */}
+      {onResizeStart && (
+        <span
+          onMouseDown={(e) => onResizeStart(col, e)}
+          className="absolute right-0 top-0 h-full w-1.5 cursor-col-resize touch-none select-none hover:bg-primary/50"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label={`Resize ${label} column`}
+        />
+      )}
     </th>
   );
 }
@@ -248,6 +281,9 @@ export default function FundsPage() {
   const [sort, setSort] = useState<string>("par_change");
   const [dir, setDir] = useState<SortDir>("desc");
   const [page, setPage] = useState(1);
+  const [widths, setWidths] = useState<Record<string, number>>(() =>
+    Object.fromEntries(COLUMNS.map((c) => [c.key, c.w])),
+  );
 
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [debFilters, setDebFilters] = useState<Filters>(EMPTY_FILTERS);
@@ -405,6 +441,23 @@ export default function FundsPage() {
     }
   }
 
+  // Drag a header's right edge to resize that column.
+  function startResize(col: string, e: ReactMouseEvent) {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = widths[col] ?? 100;
+    const onMove = (ev: MouseEvent) =>
+      setWidths((w) => ({ ...w, [col]: Math.max(48, startW + (ev.clientX - startX)) }));
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      document.body.style.cursor = "";
+    };
+    document.body.style.cursor = "col-resize";
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }
+
   function applyPreset(key: string, days: number) {
     setPreset(key);
     if (key === "1D") {
@@ -432,6 +485,7 @@ export default function FundsPage() {
 
   const managerName = managerId === ALL ? null : managers.find((m) => m.id === managerId)?.canonical_name;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const totalWidth = Object.values(widths).reduce((a, b) => a + b, 0);
   const firstRow = total === 0 ? 0 : (page - 1) * pageSize + 1;
   const lastRow = Math.min(page * pageSize, total);
 
@@ -555,23 +609,29 @@ export default function FundsPage() {
         {/* Table (70%) */}
         <section className="flex h-[70%] min-h-0 flex-col">
           <div className="min-h-0 flex-1 overflow-auto">
-            <table className="w-full border-collapse text-sm">
+            <table
+              className="table-fixed border-collapse text-sm [&_tbody_td]:overflow-hidden [&_tbody_td]:text-ellipsis [&_tbody_td]:whitespace-nowrap"
+              style={{ width: totalWidth }}
+            >
+              <colgroup>
+                {COLUMNS.map((c) => (
+                  <col key={c.key} style={{ width: widths[c.key] }} />
+                ))}
+              </colgroup>
               <thead className="sticky top-0 z-10 bg-muted/80 backdrop-blur">
                 <tr className="text-left text-muted-foreground">
-                  <SortHeader col="ticker" label="Fund" sort={sort} dir={dir} onSort={toggleSort} />
-                  <SortHeader col="as_of_date" label="Date" sort={sort} dir={dir} onSort={toggleSort} />
-                  <SortHeader col="cusip" label="Cusip" sort={sort} dir={dir} onSort={toggleSort} />
-                  <SortHeader col="description" label="Description" sort={sort} dir={dir} onSort={toggleSort} />
-                  <SortHeader col="security_type" label="Type" sort={sort} dir={dir} onSort={toggleSort} />
-                  <SortHeader col="par_value" label="Par Value" sort={sort} dir={dir} onSort={toggleSort} align="right" />
-                  <SortHeader col="par_change" label="Par Change" sort={sort} dir={dir} onSort={toggleSort} align="right" />
-                  <SortHeader col="change_type" label="Change" sort={sort} dir={dir} onSort={toggleSort} />
-                  <SortHeader col="cpn" label="CPN" sort={sort} dir={dir} onSort={toggleSort} align="right" />
-                  <SortHeader col="wam" label="WAM" sort={sort} dir={dir} onSort={toggleSort} align="right" />
-                  <SortHeader col="wala" label="WALA" sort={sort} dir={dir} onSort={toggleSort} align="right" />
-                  <SortHeader col="gen_ticker" label="TICKER" sort={sort} dir={dir} onSort={toggleSort} />
-                  <SortHeader col="cohort" label="COHORT" sort={sort} dir={dir} onSort={toggleSort} />
-                  <SortHeader col="sec_type" label="SEC TYPE" sort={sort} dir={dir} onSort={toggleSort} />
+                  {COLUMNS.map((c) => (
+                    <SortHeader
+                      key={c.key}
+                      col={c.key}
+                      label={c.label}
+                      align={c.align}
+                      sort={sort}
+                      dir={dir}
+                      onSort={toggleSort}
+                      onResizeStart={startResize}
+                    />
+                  ))}
                 </tr>
                 {/* Filter row */}
                 <tr className="border-t border-border bg-background/60">
