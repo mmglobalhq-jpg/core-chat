@@ -1,0 +1,502 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import {
+  ArrowLeft,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsUpDown,
+  ChevronUp,
+  Download,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { ThemeToggle } from "@/components/theme/ThemeToggle";
+import { useIsAdmin } from "@/lib/useIsAdmin";
+import { supabase } from "@/lib/supabaseClient";
+import { cn } from "@/lib/utils";
+
+const ALL = "all";
+const SECURITY_TYPES = ["UST", "AGY", "MBS", "ACMBS", "CMO", "CMBS", "ABS", "CLO", "CORP", "HY", "SOV", "$MKT"];
+const CHANGE_TYPES = ["New", "Old", "Increased", "Decreased", "Unchanged"];
+const PRESETS: { key: string; days: number }[] = [
+  { key: "1D", days: 1 },
+  { key: "7D", days: 7 },
+  { key: "30D", days: 30 },
+  { key: "1Y", days: 365 },
+];
+
+type Manager = { id: string; canonical_name: string };
+type Fund = { id: string; ticker: string; fund_name: string | null; manager_id: string };
+type Row = {
+  ticker: string;
+  as_of_date: string;
+  cusip: string | null;
+  description: string | null;
+  security_type: string | null;
+  par_value: number | null;
+  par_change: number | null;
+  change_type: string | null;
+};
+type SortDir = "asc" | "desc";
+type Filters = {
+  ticker: string;
+  cusip: string;
+  description: string;
+  security_type: string;
+  change_type: string;
+  par_min: string;
+  par_max: string;
+};
+const EMPTY_FILTERS: Filters = {
+  ticker: "",
+  cusip: "",
+  description: "",
+  security_type: "",
+  change_type: "",
+  par_min: "",
+  par_max: "",
+};
+
+const money = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  maximumFractionDigits: 0,
+});
+const fmtPar = (v: number | null) => (v == null ? "" : money.format(v));
+const fmtChange = (v: number | null) => {
+  if (v == null || v === 0) return v === 0 ? "$0" : "";
+  const s = money.format(Math.abs(v));
+  return v > 0 ? `+${s}` : `-${s}`;
+};
+const CHANGE_COLOR: Record<string, string> = {
+  New: "text-sky-600 dark:text-sky-400",
+  Increased: "text-emerald-600 dark:text-emerald-400",
+  Decreased: "text-red-600 dark:text-red-400",
+  Old: "text-amber-600 dark:text-amber-400",
+  Unchanged: "text-muted-foreground",
+};
+
+function addDays(iso: string, n: number): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + n);
+  return dt.toISOString().slice(0, 10);
+}
+
+/** Themed labeled control wrapper. */
+function Field({ label, className, children }: { label: string; className?: string; children: React.ReactNode }) {
+  return (
+    <label className={cn("flex flex-col gap-1.5", className)}>
+      <span className="text-xs font-medium text-muted-foreground">{label}</span>
+      {children}
+    </label>
+  );
+}
+
+const inputCls =
+  "h-9 w-full rounded-md border border-input bg-background px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40";
+const filterCls =
+  "h-7 w-full min-w-0 rounded border border-input bg-background px-2 text-xs outline-none focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/40";
+
+/** Clickable header that toggles server-side sort on its column. */
+function SortHeader({
+  col,
+  label,
+  sort,
+  dir,
+  onSort,
+  align = "left",
+}: {
+  col: string;
+  label: string;
+  sort: string;
+  dir: SortDir;
+  onSort: (col: string) => void;
+  align?: "left" | "right";
+}) {
+  const active = sort === col;
+  return (
+    <th className={cn("px-3 py-2 font-medium", align === "right" && "text-right")}>
+      <button
+        type="button"
+        onClick={() => onSort(col)}
+        className={cn("inline-flex items-center gap-1 hover:text-foreground", align === "right" && "flex-row-reverse")}
+      >
+        {label}
+        {active ? (
+          dir === "asc" ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />
+        ) : (
+          <ChevronsUpDown className="size-3.5 opacity-40" />
+        )}
+      </button>
+    </th>
+  );
+}
+
+export default function FundsPage() {
+  const [managers, setManagers] = useState<Manager[]>([]);
+  const [funds, setFunds] = useState<Fund[]>([]);
+  const [latestDate, setLatestDate] = useState<string | null>(null);
+
+  const [managerId, setManagerId] = useState<string>(ALL);
+  const [fundId, setFundId] = useState<string>(ALL);
+  const [startDate, setStartDate] = useState<string>("");
+  const [endDate, setEndDate] = useState<string>("");
+  // false = default "1-day" (latest vs previous snapshot, instant matview);
+  // true = explicit range sent to the live per-fund-anchored RPC.
+  const [customRange, setCustomRange] = useState(false);
+  const [preset, setPreset] = useState<string | null>("1D");
+
+  const [sort, setSort] = useState<string>("par_change");
+  const [dir, setDir] = useState<SortDir>("desc");
+  const [page, setPage] = useState(1);
+
+  const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
+  const [debFilters, setDebFilters] = useState<Filters>(EMPTY_FILTERS);
+
+  const [rows, setRows] = useState<Row[]>([]);
+  const [total, setTotal] = useState(0);
+  const [pageSize, setPageSize] = useState(100);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const isAdmin = useIsAdmin();
+  const [exporting, setExporting] = useState(false);
+
+  // Admin-only: download every distinct CUSIP as a CSV. Sends the caller's
+  // Supabase access token so the route's requireAdmin gate passes.
+  async function exportCusips() {
+    setExporting(true);
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const res = await fetch("/api/funds/cusips", {
+        headers: { Authorization: `Bearer ${session?.access_token ?? ""}` },
+      });
+      if (!res.ok) throw new Error(String(res.status));
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "cusips.csv";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      setError("CUSIP export failed.");
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  // Load dropdown data + seed the default date boxes (End = latest, Start = 1 prior).
+  useEffect(() => {
+    fetch("/api/funds/options")
+      .then((r) => r.json())
+      .then((d) => {
+        setManagers(d.managers ?? []);
+        setFunds(d.funds ?? []);
+        if (d.latestDate) {
+          setLatestDate(d.latestDate);
+          setEndDate(d.latestDate);
+          setStartDate(addDays(d.latestDate, -1));
+        }
+      })
+      .catch(() => setError("Failed to load managers/funds."));
+  }, []);
+
+  // Debounce free-text filters so we don't fetch on every keystroke.
+  useEffect(() => {
+    const t = setTimeout(() => setDebFilters(filters), 350);
+    return () => clearTimeout(t);
+  }, [filters]);
+
+  const fundsForManager = useMemo(
+    () => (managerId === ALL ? funds : funds.filter((f) => f.manager_id === managerId)),
+    [funds, managerId],
+  );
+
+  // Any change to selection / range / sort / filters returns to page 1.
+  useEffect(() => {
+    setPage(1);
+  }, [managerId, fundId, sort, dir, customRange, startDate, endDate, debFilters]);
+
+  // Fetch the table.
+  useEffect(() => {
+    const ctrl = new AbortController();
+    setLoading(true);
+    setError(null);
+    const qs = new URLSearchParams({ manager: managerId, fund: fundId, page: String(page), sort, dir });
+    if (customRange && startDate && endDate) {
+      qs.set("start", startDate);
+      qs.set("end", endDate);
+    }
+    if (debFilters.ticker) qs.set("f_ticker", debFilters.ticker);
+    if (debFilters.cusip) qs.set("f_cusip", debFilters.cusip);
+    if (debFilters.description) qs.set("f_description", debFilters.description);
+    if (debFilters.security_type) qs.set("f_type", debFilters.security_type);
+    if (debFilters.change_type) qs.set("f_change", debFilters.change_type);
+    if (debFilters.par_min) qs.set("f_par_min", debFilters.par_min);
+    if (debFilters.par_max) qs.set("f_par_max", debFilters.par_max);
+
+    fetch(`/api/funds/holdings?${qs}`, { signal: ctrl.signal })
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.error) throw new Error(d.error);
+        setRows(d.rows ?? []);
+        setTotal(d.total ?? 0);
+        setPageSize(d.pageSize ?? 100);
+      })
+      .catch((e) => {
+        if (e.name !== "AbortError") setError("Failed to load holdings.");
+      })
+      .finally(() => setLoading(false));
+    return () => ctrl.abort();
+  }, [managerId, fundId, page, sort, dir, customRange, startDate, endDate, debFilters]);
+
+  function toggleSort(col: string) {
+    if (sort === col) setDir((d) => (d === "asc" ? "desc" : "asc"));
+    else {
+      setSort(col);
+      setDir(col === "par_value" || col === "par_change" ? "desc" : "asc");
+    }
+  }
+
+  function applyPreset(key: string, days: number) {
+    setPreset(key);
+    if (key === "1D") {
+      // default: latest vs previous snapshot (fast matview path)
+      setCustomRange(false);
+      if (latestDate) {
+        setEndDate(latestDate);
+        setStartDate(addDays(latestDate, -1));
+      }
+    } else if (latestDate) {
+      setCustomRange(true);
+      setEndDate(latestDate);
+      setStartDate(addDays(latestDate, -days));
+    }
+  }
+
+  function editDate(which: "start" | "end", v: string) {
+    setPreset(null);
+    setCustomRange(true);
+    if (which === "start") setStartDate(v);
+    else setEndDate(v);
+  }
+
+  const setF = (patch: Partial<Filters>) => setFilters((f) => ({ ...f, ...patch }));
+
+  const managerName = managerId === ALL ? null : managers.find((m) => m.id === managerId)?.canonical_name;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const firstRow = total === 0 ? 0 : (page - 1) * pageSize + 1;
+  const lastRow = Math.min(page * pageSize, total);
+
+  return (
+    <div className="flex h-dvh flex-col bg-background text-foreground">
+      <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border px-4">
+        <Button asChild variant="ghost" size="icon" className="size-9" aria-label="Back to chat">
+          <Link href="/">
+            <ArrowLeft className="size-5" />
+          </Link>
+        </Button>
+        <h1 className="text-base font-medium">Fund Holdings</h1>
+        <div className="ml-auto flex items-center gap-2">
+          {isAdmin && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={exportCusips}
+              disabled={exporting}
+            >
+              <Download className="size-4" />
+              {exporting ? "Exporting…" : "Export Cusips"}
+            </Button>
+          )}
+          <ThemeToggle />
+        </div>
+      </header>
+
+      <div className="flex min-h-0 flex-1 flex-col">
+        {/* Controls (30%) */}
+        <section className="h-[30%] shrink-0 overflow-auto border-b border-border p-4">
+          <div className="flex flex-wrap items-end gap-4">
+            <Field label="Fund Manager" className="w-56">
+              <select
+                className={inputCls}
+                value={managerId}
+                onChange={(e) => {
+                  setManagerId(e.target.value);
+                  setFundId(ALL);
+                }}
+              >
+                <option value={ALL}>All Managers</option>
+                {managers.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.canonical_name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+
+            <Field label="Fund" className="w-64">
+              <select className={inputCls} value={fundId} onChange={(e) => setFundId(e.target.value)}>
+                <option value={ALL}>All Funds{managerName ? ` (${managerName})` : ""}</option>
+                {fundsForManager.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.ticker}
+                    {f.fund_name ? ` — ${f.fund_name}` : ""}
+                  </option>
+                ))}
+              </select>
+            </Field>
+
+            <Field label="Start" className="w-40">
+              <input type="date" className={inputCls} value={startDate} max={endDate || undefined} onChange={(e) => editDate("start", e.target.value)} />
+            </Field>
+            <Field label="End" className="w-40">
+              <input type="date" className={inputCls} value={endDate} max={latestDate || undefined} onChange={(e) => editDate("end", e.target.value)} />
+            </Field>
+
+            <Field label="Range">
+              <div className="flex gap-1">
+                {PRESETS.map((p) => (
+                  <Button
+                    key={p.key}
+                    type="button"
+                    size="sm"
+                    variant={preset === p.key ? "default" : "outline"}
+                    onClick={() => applyPreset(p.key, p.days)}
+                  >
+                    {p.key}
+                  </Button>
+                ))}
+              </div>
+            </Field>
+          </div>
+          <p className="mt-3 text-xs text-muted-foreground">
+            Par change &amp; type are computed per fund against its nearest prior snapshot (business days).{" "}
+            {customRange
+              ? `Range: ${startDate} → ${endDate}.`
+              : "Default: latest 1-day change vs each fund's previous snapshot (only when it's within ~2 weeks; funds with no recent prior snapshot show no change)."}
+          </p>
+        </section>
+
+        {/* Table (70%) */}
+        <section className="flex h-[70%] min-h-0 flex-col">
+          <div className="min-h-0 flex-1 overflow-auto">
+            <table className="w-full border-collapse text-sm">
+              <thead className="sticky top-0 z-10 bg-muted/80 backdrop-blur">
+                <tr className="text-left text-muted-foreground">
+                  <SortHeader col="ticker" label="Fund" sort={sort} dir={dir} onSort={toggleSort} />
+                  <SortHeader col="as_of_date" label="Date" sort={sort} dir={dir} onSort={toggleSort} />
+                  <SortHeader col="cusip" label="Cusip" sort={sort} dir={dir} onSort={toggleSort} />
+                  <SortHeader col="description" label="Description" sort={sort} dir={dir} onSort={toggleSort} />
+                  <SortHeader col="security_type" label="Type" sort={sort} dir={dir} onSort={toggleSort} />
+                  <SortHeader col="par_value" label="Par Value" sort={sort} dir={dir} onSort={toggleSort} align="right" />
+                  <SortHeader col="par_change" label="Par Change" sort={sort} dir={dir} onSort={toggleSort} align="right" />
+                  <SortHeader col="change_type" label="Change" sort={sort} dir={dir} onSort={toggleSort} />
+                </tr>
+                {/* Filter row */}
+                <tr className="border-t border-border bg-background/60">
+                  <td className="px-2 py-1">
+                    <input className={filterCls} placeholder="filter" value={filters.ticker} onChange={(e) => setF({ ticker: e.target.value })} />
+                  </td>
+                  <td className="px-2 py-1" />
+                  <td className="px-2 py-1">
+                    <input className={filterCls} placeholder="filter" value={filters.cusip} onChange={(e) => setF({ cusip: e.target.value })} />
+                  </td>
+                  <td className="px-2 py-1">
+                    <input className={filterCls} placeholder="filter" value={filters.description} onChange={(e) => setF({ description: e.target.value })} />
+                  </td>
+                  <td className="px-2 py-1">
+                    <select className={filterCls} value={filters.security_type} onChange={(e) => setF({ security_type: e.target.value })}>
+                      <option value="">All</option>
+                      {SECURITY_TYPES.map((t) => (
+                        <option key={t} value={t}>
+                          {t}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                  <td className="px-2 py-1">
+                    <input className={cn(filterCls, "text-right")} placeholder="min $" inputMode="numeric" value={filters.par_min} onChange={(e) => setF({ par_min: e.target.value.replace(/[^0-9]/g, "") })} />
+                  </td>
+                  <td className="px-2 py-1" />
+                  <td className="px-2 py-1">
+                    <select className={filterCls} value={filters.change_type} onChange={(e) => setF({ change_type: e.target.value })}>
+                      <option value="">All</option>
+                      {CHANGE_TYPES.map((t) => (
+                        <option key={t} value={t}>
+                          {t}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r, i) => (
+                  <tr key={`${r.ticker}-${r.cusip}-${i}`} className="border-t border-border hover:bg-muted/40">
+                    <td className="px-3 py-1.5 font-mono">{r.ticker}</td>
+                    <td className="px-3 py-1.5 tabular-nums">{r.as_of_date}</td>
+                    <td className="px-3 py-1.5 font-mono">{r.cusip ?? ""}</td>
+                    <td className="px-3 py-1.5">{r.description ?? ""}</td>
+                    <td className="px-3 py-1.5">{r.security_type ?? ""}</td>
+                    <td className="px-3 py-1.5 text-right font-mono tabular-nums">{fmtPar(r.par_value)}</td>
+                    <td
+                      className={cn(
+                        "px-3 py-1.5 text-right font-mono tabular-nums",
+                        (r.par_change ?? 0) > 0 && "text-emerald-600 dark:text-emerald-400",
+                        (r.par_change ?? 0) < 0 && "text-red-600 dark:text-red-400",
+                      )}
+                    >
+                      {fmtChange(r.par_change)}
+                    </td>
+                    <td className={cn("px-3 py-1.5", r.change_type ? CHANGE_COLOR[r.change_type] : "")}>{r.change_type ?? ""}</td>
+                  </tr>
+                ))}
+                {!loading && rows.length === 0 && (
+                  <tr>
+                    <td colSpan={8} className="px-3 py-10 text-center text-muted-foreground">
+                      {error ?? "No holdings for this selection."}
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+            {loading && <div className="px-3 py-10 text-center text-sm text-muted-foreground">Loading…</div>}
+          </div>
+
+          {/* Pagination */}
+          <div className="flex shrink-0 items-center justify-between gap-3 border-t border-border px-4 py-2 text-sm text-muted-foreground">
+            <span className={cn(error && "text-destructive")}>
+              {error
+                ? error
+                : total === 0
+                  ? "0 rows"
+                  : `${firstRow.toLocaleString()}–${lastRow.toLocaleString()} of ${total.toLocaleString()}`}
+            </span>
+            <div className="flex items-center gap-2">
+              <span>
+                Page {page} / {totalPages}
+              </span>
+              <Button variant="outline" size="icon" className="size-8" disabled={page <= 1 || loading} onClick={() => setPage((p) => Math.max(1, p - 1))} aria-label="Previous page">
+                <ChevronLeft className="size-4" />
+              </Button>
+              <Button variant="outline" size="icon" className="size-8" disabled={page >= totalPages || loading} onClick={() => setPage((p) => Math.min(totalPages, p + 1))} aria-label="Next page">
+                <ChevronRight className="size-4" />
+              </Button>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+  );
+}
