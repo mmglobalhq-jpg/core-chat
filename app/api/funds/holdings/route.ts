@@ -15,10 +15,17 @@ const SORTABLE = new Set([
   "par_value",
   "par_change",
   "change_type",
+  "cpn",
+  "wam",
+  "wala",
+  "gen_ticker",
+  "cohort",
+  "sec_type",
 ]);
 
 const COLS =
-  "ticker, as_of_date, cusip, description, security_type, par_value, par_change, change_type";
+  "ticker, as_of_date, cusip, description, security_type, par_value, par_change, change_type, " +
+  "cpn, wam, wala, gen_ticker, cohort, sec_type";
 
 /**
  * Paginated fund holdings with per-position par change + change type over a date
@@ -94,6 +101,12 @@ export async function GET(request: Request) {
       par_value: number | null;
       par_change: number | null;
       change_type: string | null;
+      cpn: number | null;
+      wam: number | null;
+      wala: number | null;
+      gen_ticker: string | null;
+      cohort: string | null;
+      sec_type: string | null;
       total_count: number;
     };
     const raw = (data ?? []) as ChangeRow[];
@@ -107,13 +120,20 @@ export async function GET(request: Request) {
       par_value: r.par_value,
       par_change: r.par_change,
       change_type: r.change_type,
+      cpn: r.cpn,
+      wam: r.wam,
+      wala: r.wala,
+      gen_ticker: r.gen_ticker,
+      cohort: r.cohort,
+      sec_type: r.sec_type,
     }));
     return NextResponse.json({ rows, total, page, pageSize: PAGE_SIZE });
   }
 
-  // --- Default (latest-vs-previous "1-day" change): instant matview read. ---
+  // --- Default (latest-vs-previous "1-day" change): instant matview read,
+  //     enriched with any imported CUSIP data via v_dashboard_current. ---
   let q = db
-    .from("mv_current_changes")
+    .from("v_dashboard_current")
     .select(COLS, { count: "exact" })
     .order(sort, { ascending: dir === "asc", nullsFirst: false })
     .range(from, to);
