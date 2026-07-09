@@ -85,9 +85,29 @@ export async function GET(request: Request) {
       p_offset: from,
     });
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    const raw = data ?? [];
+    type ChangeRow = {
+      ticker: string;
+      as_of_date: string;
+      cusip: string | null;
+      description: string | null;
+      security_type: string | null;
+      par_value: number | null;
+      par_change: number | null;
+      change_type: string | null;
+      total_count: number;
+    };
+    const raw = (data ?? []) as ChangeRow[];
     const total = raw.length ? Number(raw[0].total_count) : 0;
-    const rows = raw.map(({ total_count: _t, ...r }) => r);
+    const rows = raw.map((r) => ({
+      ticker: r.ticker,
+      as_of_date: r.as_of_date,
+      cusip: r.cusip,
+      description: r.description,
+      security_type: r.security_type,
+      par_value: r.par_value,
+      par_change: r.par_change,
+      change_type: r.change_type,
+    }));
     return NextResponse.json({ rows, total, page, pageSize: PAGE_SIZE });
   }
 
