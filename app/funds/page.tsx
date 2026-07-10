@@ -681,7 +681,7 @@ export default function FundsPage() {
                   <td className="px-2 py-1" />
                   <td className="px-2 py-1">
                     <select className={filterCls} value={filters.change_type} onChange={(e) => setF({ change_type: e.target.value })}>
-                      <option value="">All</option>
+                      <option value="">Changed</option>
                       {CHANGE_TYPES.map((t) => (
                         <option key={t} value={t}>
                           {t}

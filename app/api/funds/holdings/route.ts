@@ -157,7 +157,10 @@ export async function GET(request: Request) {
   if (fCusip) q = q.ilike("cusip", `%${fCusip}%`);
   if (fDesc) q = q.ilike("description", `%${fDesc}%`);
   if (fType) q = q.eq("security_type", fType);
+  // Dashboard shows what CHANGED: exclude "Unchanged" unless the user explicitly
+  // picks a change_type (mirrors dashboard_changes() for the custom-range path).
   if (fChange) q = q.eq("change_type", fChange);
+  else q = q.neq("change_type", "Unchanged");
   if (fParMin) q = q.gte("par_value", Number(fParMin));
   if (fParMax) q = q.lte("par_value", Number(fParMax));
   if (fCpnMin) q = q.gte("cpn", Number(fCpnMin));
