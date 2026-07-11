@@ -1,8 +1,9 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { BarChart3, LogOut, PanelLeftClose, Plus, ShieldCheck, X } from "lucide-react";
+import { BarChart3, BookOpen, LogOut, PanelLeftClose, Plus, ShieldCheck, X } from "lucide-react";
 import {
   Sheet,
   SheetContent,
@@ -13,6 +14,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import { SettingsModal } from "@/components/settings/SettingsModal";
+import { KnowledgeBaseModal } from "@/components/kb/KnowledgeBaseModal";
 import { supabase } from "@/lib/supabaseClient";
 import { useChatStore } from "@/store/useChatStore";
 import { useIsAdmin } from "@/lib/useIsAdmin";
@@ -78,6 +80,7 @@ function SidebarBody({
   const hideConversation = useChatStore((s) => s.hideConversation);
   const isAdmin = useIsAdmin();
   const router = useRouter();
+  const [kbOpen, setKbOpen] = useState(false);
 
   async function handleSignOut() {
     await supabase.auth.signOut();
@@ -178,6 +181,15 @@ function SidebarBody({
       <div className="mt-auto border-t border-sidebar-border p-2">
         <p className="px-2 py-1 text-xs font-medium text-muted-foreground">Apps</p>
         <Button
+          type="button"
+          variant="ghost"
+          className="w-full justify-start gap-2 text-sidebar-foreground"
+          onClick={() => setKbOpen(true)}
+        >
+          <BookOpen className="size-4" />
+          <span className="text-sm">Knowledge Base</span>
+        </Button>
+        <Button
           asChild
           variant="ghost"
           className="w-full justify-start gap-2 text-sidebar-foreground"
@@ -188,6 +200,8 @@ function SidebarBody({
           </Link>
         </Button>
       </div>
+
+      <KnowledgeBaseModal open={kbOpen} onClose={() => setKbOpen(false)} />
 
       {/* Bottom: settings + theme toggle pinned (FR-004, FR-020). */}
       <div className="border-t border-sidebar-border p-2">
