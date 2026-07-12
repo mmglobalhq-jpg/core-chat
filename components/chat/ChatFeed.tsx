@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Message as UIMessage } from "ai";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Button } from "@/components/ui/button";
 import { MessageBubble } from "@/components/chat/MessageBubble";
 import type { DocumentRow } from "@/lib/types";
 
@@ -14,19 +15,40 @@ interface ChatFeedProps {
   docsByMessage?: Record<string, DocumentRow[]>;
 }
 
+// Windowed rendering: only the most recent WINDOW messages are kept in the DOM;
+// older ones load in chunks on demand. This bounds mount/update cost on long chats
+// (a reopened 300-message conversation otherwise renders all 300 bubbles at once).
+// The streaming tail is always inside the window, so autoscroll and the streaming
+// `loading` flag are unaffected.
+const WINDOW = 40;
+const WINDOW_STEP = 40;
+
 export function ChatFeed({
   messages,
   isStreaming = false,
   docsByMessage = {},
 }: ChatFeedProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
+  const [visibleCount, setVisibleCount] = useState(WINDOW);
 
-  // Keep the latest message in view as new ones arrive (FR-015).
+  // Reset the window when the conversation changes (its first message id changes),
+  // so reopening a long chat starts at the bottom rather than fully expanded.
+  const conversationKey = messages[0]?.id;
+  useEffect(() => {
+    setVisibleCount(WINDOW);
+  }, [conversationKey]);
+
+  // Keep the latest message in view as new ones arrive (FR-015). Fires on
+  // messages.length — not on "load earlier" (which only grows visibleCount), so
+  // revealing older messages doesn't yank the view back to the bottom.
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages.length]);
 
   const isEmpty = messages.length === 0;
+  const hasOlder = messages.length > visibleCount;
+  // Always keep the tail (newest messages) rendered; drop the oldest beyond the window.
+  const shown = hasOlder ? messages.slice(messages.length - visibleCount) : messages;
 
   return (
     <ScrollArea className="h-full w-full">
@@ -42,7 +64,20 @@ export function ChatFeed({
           </div>
         ) : (
           <div className="flex flex-col gap-6">
-            {messages.map((message, index) =>
+            {hasOlder && (
+              <div className="flex justify-center">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setVisibleCount((n) => n + WINDOW_STEP)}
+                  className="text-muted-foreground"
+                >
+                  Load earlier messages
+                </Button>
+              </div>
+            )}
+            {shown.map((message, index) =>
               message.role === "user" || message.role === "assistant" ? (
                 <MessageBubble
                   key={message.id}
@@ -51,7 +86,7 @@ export function ChatFeed({
                   docs={docsByMessage[message.id]}
                   loading={
                     isStreaming &&
-                    index === messages.length - 1 &&
+                    index === shown.length - 1 &&
                     message.role === "assistant"
                   }
                 />
