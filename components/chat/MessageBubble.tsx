@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { memo, useState } from "react";
 import { Check, Copy } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -18,7 +18,12 @@ interface MessageBubbleProps {
   loading?: boolean;
 }
 
-export function MessageBubble({
+// Memoized: during streaming the parent re-renders on every token flush, but only
+// the trailing (streaming) bubble's `content` actually changes. A shallow-prop memo
+// means every already-final bubble is skipped — O(messages) re-renders per flush
+// collapses to O(1). Props are primitives except `docs`, whose reference is stable
+// per message (from the store), so the shallow compare holds.
+function MessageBubbleImpl({
   role,
   content,
   docs,
@@ -113,3 +118,5 @@ export function MessageBubble({
     </div>
   );
 }
+
+export const MessageBubble = memo(MessageBubbleImpl);

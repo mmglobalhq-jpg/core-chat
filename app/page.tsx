@@ -160,19 +160,33 @@ export default function Home() {
       setIsStreaming(true);
 
       let streamed = "";
-      const finalize = (content: string) =>
+      // Coalesce token writes to at most one store update per animation frame (~60/s)
+      // instead of one per token. Each patch mints a new messages array and re-renders
+      // the feed, so batching makes streaming render cost frame-bound rather than
+      // proportional to the backend token rate.
+      let rafId: number | null = null;
+      const flushStreamed = () => {
+        rafId = null;
+        useChatStore
+          .getState()
+          .patchMessageContent(conversationId, assistantId, streamed);
+      };
+      const finalize = (content: string) => {
+        if (rafId !== null) {
+          cancelAnimationFrame(rafId);
+          rafId = null;
+        }
         useChatStore
           .getState()
           .finalizeAssistantMessage(conversationId, assistantId, content);
+      };
 
       sendChat(
         text,
         selectedModelId,
         (token) => {
           streamed += token;
-          useChatStore
-            .getState()
-            .patchMessageContent(conversationId, assistantId, streamed);
+          if (rafId === null) rafId = requestAnimationFrame(flushStreamed);
         },
         controller.signal,
         priorHistory,
