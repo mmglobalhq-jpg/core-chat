@@ -1,133 +1,157 @@
 "use client";
 
 /**
- * Settings overlay opened from the sidebar's Settings button. A right-side Sheet
- * (Dialog-based, accessible: focus trap, Esc/overlay close, built-in close button)
- * with two tabs: Profile (read-only fields from public.profiles) and Preferences
- * (theme selection). Works for every signed-in user — separate from the
- * admin-only /settings/admin page.
+ * Settings entry point (bottom-left of the sidebar, above Sign out). Clicking it
+ * opens a small popup MENU anchored bottom-left (Claude-style) listing the settings
+ * sections — Profile, Integrations, and (admin-only) Desktop + Admin. Picking a
+ * section opens a larger centered dialog with that section's content; Admin routes
+ * to the /settings/admin page. Theme lives in the top-right toggle, not here.
  */
 import { useEffect, useState } from "react";
-import { CalendarDays, Check, ExternalLink, Loader2, Monitor, Plug, Settings, SlidersHorizontal, User } from "lucide-react";
-import { useTheme } from "next-themes";
-import { supabase } from "@/lib/supabaseClient";
+import { useRouter } from "next/navigation";
 import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
-} from "@/components/ui/sheet";
+  CalendarDays,
+  ExternalLink,
+  Loader2,
+  Monitor,
+  Plug,
+  Settings,
+  ShieldCheck,
+  User,
+  X,
+} from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { useProfile } from "@/lib/useProfile";
 import { useIsAdmin } from "@/lib/useIsAdmin";
-import { cn } from "@/lib/utils";
+import { supabase } from "@/lib/supabaseClient";
 
-type Tab = "profile" | "preferences" | "integrations" | "desktop";
+type Section = "profile" | "integrations" | "desktop";
 
-export function SettingsModal() {
-  const [tab, setTab] = useState<Tab>("profile");
+const SECTION_META: Record<Section, { title: string; icon: React.ReactNode }> = {
+  profile: { title: "Profile", icon: <User className="size-5 text-primary" /> },
+  integrations: { title: "Integrations", icon: <Plug className="size-5 text-primary" /> },
+  desktop: { title: "Desktop", icon: <Monitor className="size-5 text-primary" /> },
+};
+
+export function SettingsMenu() {
   const isAdmin = useIsAdmin();
+  const router = useRouter();
+  const [section, setSection] = useState<Section | null>(null);
 
   return (
-    <Sheet>
-      <SheetTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          className="w-full justify-start gap-2 text-sidebar-foreground"
-        >
-          <Settings className="size-4" />
-          <span className="text-sm">Settings</span>
-        </Button>
-      </SheetTrigger>
-      <SheetContent side="right" className="w-full gap-0 p-0 sm:max-w-md">
-        <SheetHeader className="border-b border-border p-4">
-          <SheetTitle>Settings</SheetTitle>
-        </SheetHeader>
-
-        <div role="tablist" aria-label="Settings sections" className="flex gap-1 border-b border-border p-2">
-          <TabButton active={tab === "profile"} onClick={() => setTab("profile")} icon={<User className="size-4" />}>
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            className="w-full justify-start gap-2 text-sidebar-foreground"
+          >
+            <Settings className="size-4" />
+            <span className="text-sm">Settings</span>
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent side="top" align="start" sideOffset={8} className="w-56">
+          <DropdownMenuItem onClick={() => setSection("profile")}>
+            <User className="size-4" />
             Profile
-          </TabButton>
-          <TabButton active={tab === "preferences"} onClick={() => setTab("preferences")} icon={<SlidersHorizontal className="size-4" />}>
-            Preferences
-          </TabButton>
-          <TabButton active={tab === "integrations"} onClick={() => setTab("integrations")} icon={<Plug className="size-4" />}>
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => setSection("integrations")}>
+            <Plug className="size-4" />
             Integrations
-          </TabButton>
-          {/* Admin-only Desktop tab. */}
+          </DropdownMenuItem>
           {isAdmin && (
-            <TabButton active={tab === "desktop"} onClick={() => setTab("desktop")} icon={<Monitor className="size-4" />}>
+            <DropdownMenuItem onClick={() => setSection("desktop")}>
+              <Monitor className="size-4" />
               Desktop
-            </TabButton>
+            </DropdownMenuItem>
           )}
-        </div>
+          {isAdmin && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => router.push("/settings/admin")}>
+                <ShieldCheck className="size-4" />
+                Admin
+              </DropdownMenuItem>
+            </>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
 
-        <div className="p-4">
-          {tab === "preferences" ? (
-            <PreferencesTab />
-          ) : tab === "integrations" ? (
-            <IntegrationsTab />
-          ) : tab === "desktop" && isAdmin ? (
-            <DesktopTab />
-          ) : (
-            <ProfileTab />
-          )}
-        </div>
-      </SheetContent>
-    </Sheet>
+      {section && <SettingsDialog section={section} onClose={() => setSection(null)} />}
+    </>
   );
 }
 
-function TabButton({
-  active,
-  onClick,
-  icon,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  icon: React.ReactNode;
-  children: React.ReactNode;
-}) {
+function SettingsDialog({ section, onClose }: { section: Section; onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const meta = SECTION_META[section];
   return (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={active}
-      onClick={onClick}
-      className={cn(
-        "flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-sm transition-colors",
-        active ? "bg-muted font-medium text-foreground" : "text-muted-foreground hover:bg-muted/50",
-      )}
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-label={meta.title}
     >
-      {icon}
-      {children}
-    </button>
+      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+      <div className="relative z-10 flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-xl border border-border bg-background shadow-xl">
+        <div className="flex items-center justify-between border-b border-border p-4">
+          <div className="flex items-center gap-2">
+            {meta.icon}
+            <h2 className="text-base font-semibold text-foreground">{meta.title}</h2>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="rounded-lg p-1 text-muted-foreground hover:bg-muted"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
+        <div className="overflow-y-auto p-4">
+          {section === "profile" ? (
+            <ProfileSection />
+          ) : section === "integrations" ? (
+            <IntegrationsSection />
+          ) : (
+            <DesktopSection />
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
-function ProfileTab() {
+function ProfileSection() {
   const { profile, loading } = useProfile();
-
   if (loading) {
     return (
-      <div className="flex justify-center py-10" role="tabpanel">
+      <div className="flex justify-center py-10">
         <Loader2 className="size-5 animate-spin text-muted-foreground" />
       </div>
     );
   }
-
   const fields: [string, string | null | undefined][] = [
     ["First name", profile?.first_name],
     ["Last name", profile?.last_name],
     ["Username", profile?.username],
     ["Email", profile?.email],
   ];
-
   return (
-    <dl className="space-y-3" role="tabpanel" aria-label="Profile">
+    <dl className="space-y-3">
       {fields.map(([label, value]) => (
         <div key={label} className="space-y-1">
           <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
@@ -137,49 +161,6 @@ function ProfileTab() {
         </div>
       ))}
     </dl>
-  );
-}
-
-function PreferencesTab() {
-  const { theme, setTheme } = useTheme();
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
-
-  const options: [string, string][] = [
-    ["light", "Light"],
-    ["dark", "Dark"],
-    ["system", "System"],
-  ];
-
-  return (
-    <div role="tabpanel" aria-label="Preferences" className="space-y-3">
-      <div>
-        <p className="text-sm font-medium text-foreground">Theme</p>
-        <p className="text-xs text-muted-foreground">Choose how Core Chat looks.</p>
-      </div>
-      <div className="grid grid-cols-3 gap-2">
-        {options.map(([value, label]) => {
-          const active = mounted && theme === value;
-          return (
-            <button
-              key={value}
-              type="button"
-              onClick={() => setTheme(value)}
-              aria-pressed={active}
-              className={cn(
-                "flex items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-sm transition-colors",
-                active
-                  ? "border-ring bg-muted text-foreground"
-                  : "border-border text-muted-foreground hover:bg-muted/50",
-              )}
-            >
-              {active && <Check className="size-3.5" />}
-              {label}
-            </button>
-          );
-        })}
-      </div>
-    </div>
   );
 }
 
@@ -194,7 +175,7 @@ async function authFetch(path: string, init?: RequestInit): Promise<Response> {
   });
 }
 
-function IntegrationsTab() {
+function IntegrationsSection() {
   const [loading, setLoading] = useState(true);
   const [connected, setConnected] = useState(false);
   const [email, setEmail] = useState<string | null>(null);
@@ -221,7 +202,7 @@ function IntegrationsTab() {
     try {
       const d = await (await authFetch("/api/integrations/google/connect")).json();
       if (d.url) {
-        window.location.href = d.url; // hand off to Google's consent screen
+        window.location.href = d.url;
         return;
       }
     } catch {
@@ -242,7 +223,7 @@ function IntegrationsTab() {
   }
 
   return (
-    <div role="tabpanel" aria-label="Integrations" className="space-y-4">
+    <div className="space-y-4">
       <div className="rounded-xl border border-border bg-muted/30 p-4">
         <div className="flex items-start gap-3">
           <span className="inline-flex size-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
@@ -281,9 +262,9 @@ function IntegrationsTab() {
   );
 }
 
-function DesktopTab() {
+function DesktopSection() {
   return (
-    <div role="tabpanel" aria-label="Desktop" className="space-y-4">
+    <div className="space-y-4">
       <div className="flex flex-col items-center gap-3 rounded-xl border border-border bg-muted/30 p-6 text-center">
         <span className="inline-flex size-12 items-center justify-center rounded-full bg-primary/10 text-primary">
           <Monitor className="size-6" />

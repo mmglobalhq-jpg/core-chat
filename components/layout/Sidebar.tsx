@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { BarChart3, BookOpen, LogOut, PanelLeftClose, Plus, ShieldCheck, X } from "lucide-react";
+import { BarChart3, BookOpen, LogOut, PanelLeftClose, Plus, X } from "lucide-react";
 import {
   Sheet,
   SheetContent,
@@ -12,12 +12,10 @@ import {
 } from "@/components/ui/sheet";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
-import { ThemeToggle } from "@/components/theme/ThemeToggle";
-import { SettingsModal } from "@/components/settings/SettingsModal";
+import { SettingsMenu } from "@/components/settings/SettingsMenu";
 import { KnowledgeBaseModal } from "@/components/kb/KnowledgeBaseModal";
 import { supabase } from "@/lib/supabaseClient";
 import { useChatStore } from "@/store/useChatStore";
-import { useIsAdmin } from "@/lib/useIsAdmin";
 import { cn } from "@/lib/utils";
 
 interface SidebarProps {
@@ -78,7 +76,6 @@ function SidebarBody({
   const newConversation = useChatStore((s) => s.newConversation);
   const selectConversation = useChatStore((s) => s.selectConversation);
   const hideConversation = useChatStore((s) => s.hideConversation);
-  const isAdmin = useIsAdmin();
   const router = useRouter();
   const [kbOpen, setKbOpen] = useState(false);
 
@@ -203,23 +200,9 @@ function SidebarBody({
 
       <KnowledgeBaseModal open={kbOpen} onClose={() => setKbOpen(false)} />
 
-      {/* Bottom: settings + theme toggle pinned (FR-004, FR-020). */}
+      {/* Bottom: Settings (opens a bottom-left popup menu) + Sign out. */}
       <div className="border-t border-sidebar-border p-2">
-        <ThemeToggle />
-        {/* Admin panel — only for is_admin users (UX gate; routes enforce it too). */}
-        {isAdmin && (
-          <Button
-            asChild
-            variant="ghost"
-            className="w-full justify-start gap-2 text-sidebar-foreground"
-          >
-            <Link href="/settings/admin">
-              <ShieldCheck className="size-4" />
-              <span className="text-sm">Admin</span>
-            </Link>
-          </Button>
-        )}
-        <SettingsModal />
+        <SettingsMenu />
         <Button
           type="button"
           variant="ghost"

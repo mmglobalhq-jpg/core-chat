@@ -5,6 +5,7 @@ import type { Message as UIMessage } from "ai";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { ChatFeed } from "@/components/chat/ChatFeed";
+import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { useChatStore, shouldAutoTitle } from "@/store/useChatStore";
 import { useChatSync } from "@/lib/useChatSync";
@@ -222,6 +223,10 @@ export default function Home() {
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-background">
+      {/* Dark/light toggle, fixed to the top-right corner of the screen. */}
+      <div className="fixed right-3 top-3 z-40">
+        <ThemeToggle />
+      </div>
       <Sidebar
         collapsed={collapsed}
         onToggle={() => setCollapsed((c) => !c)}

@@ -5,6 +5,7 @@ import { Moon, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
 
+/** Compact dark/light toggle — mounted fixed in the top-right of the screen. */
 export function ThemeToggle() {
   const { resolvedTheme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
@@ -18,18 +19,13 @@ export function ThemeToggle() {
     <Button
       type="button"
       variant="ghost"
-      className="w-full justify-start gap-2 text-sidebar-foreground"
+      size="icon"
+      className="size-9 rounded-full text-muted-foreground hover:bg-muted"
       onClick={() => setTheme(isDark ? "light" : "dark")}
-      aria-label="Toggle theme"
+      aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+      title={mounted ? (isDark ? "Dark mode" : "Light mode") : "Theme"}
     >
-      {mounted && isDark ? (
-        <Moon className="size-4" />
-      ) : (
-        <Sun className="size-4" />
-      )}
-      <span className="text-sm">
-        {mounted ? (isDark ? "Dark mode" : "Light mode") : "Theme"}
-      </span>
+      {mounted && isDark ? <Moon className="size-4" /> : <Sun className="size-4" />}
     </Button>
   );
 }
