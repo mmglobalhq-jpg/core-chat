@@ -31,7 +31,7 @@ export async function ingestFile(
   file: File,
   scope: KbScope,
   onStage: (stage: string) => void,
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: boolean; error?: string; pending?: boolean }> {
   const docId = crypto.randomUUID();
 
   onStage("uploading");
@@ -51,9 +51,15 @@ export async function ingestFile(
   const { job_id } = (await res.json()) as { job_id?: string };
   if (!job_id) return { ok: false, error: "no job id returned" };
 
-  // Poll the job (~2s cadence, up to ~2 min).
-  for (let i = 0; i < 60; i++) {
-    await new Promise((r) => setTimeout(r, 2000));
+  // Poll the job. A dense PDF (Gemini entity extraction + CPU embeddings) can take many
+  // minutes, so poll up to ~15 min with a gentle backoff, surfacing live stages. If it's
+  // STILL processing at the cap, report it as pending/background — NOT an error: the job
+  // finishes on its own and the doc appears under Manage.
+  const deadline = Date.now() + 15 * 60 * 1000;
+  let delay = 2000;
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, delay));
+    delay = Math.min(delay + 1000, 15000); // ramp 2s → 15s to avoid hammering
     const jr = await fetch(`/api/kb/jobs/${job_id}`, { headers: await authHeaders() });
     if (!jr.ok) continue;
     const j = (await jr.json()) as { status?: string; error?: string; progress?: { stage?: string } };
@@ -61,7 +67,7 @@ export async function ingestFile(
     if (j.status === "failed") return { ok: false, error: j.error ?? "ingest failed" };
     if (j.progress?.stage) onStage(j.progress.stage);
   }
-  return { ok: false, error: "timed out" };
+  return { ok: true, pending: true };
 }
 
 export async function listKbDocuments(): Promise<KbDoc[]> {

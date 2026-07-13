@@ -20,7 +20,7 @@ import {
 } from "@/lib/kb";
 
 type Tab = "add" | "manage";
-type FileStatus = "queued" | "working" | "ready" | "error";
+type FileStatus = "queued" | "working" | "ready" | "background" | "error";
 interface Item {
   key: string;
   file: File;
@@ -120,12 +120,18 @@ function AddTab() {
         setItems((prev) => prev.map((it) => (it.key === item.key ? { ...it, ...patch } : it)));
       set({ status: "working", stage: "starting", error: undefined });
       const res = await ingestFile(item.file, scope, (stage) => set({ stage }));
-      set(res.ok ? { status: "ready", stage: undefined } : { status: "error", error: res.error });
+      set(
+        res.ok
+          ? res.pending
+            ? { status: "background", stage: undefined }
+            : { status: "ready", stage: undefined }
+          : { status: "error", error: res.error },
+      );
     }
     setBusy(false);
   }
 
-  const pending = items.filter((i) => i.status !== "ready").length;
+  const pending = items.filter((i) => i.status !== "ready" && i.status !== "background").length;
   const done = items.filter((i) => i.status === "ready").length;
 
   return (
@@ -175,6 +181,11 @@ function AddTab() {
                   </div>
                 )}
                 {it.status === "error" && <p className="truncate text-xs text-red-600 dark:text-red-400">{it.error}</p>}
+                {it.status === "background" && (
+                  <p className="truncate text-xs text-amber-600 dark:text-amber-400">
+                    Still processing — it&rsquo;ll appear under Manage when ready.
+                  </p>
+                )}
                 {it.status === "working" && it.stage && <p className="text-xs text-muted-foreground">{it.stage}…</p>}
               </div>
               <StatusIcon status={it.status} />
@@ -286,6 +297,7 @@ function ManageTab() {
 function StatusIcon({ status }: { status: FileStatus }) {
   if (status === "ready") return <Check className="size-4 shrink-0 text-emerald-600 dark:text-emerald-400" />;
   if (status === "working") return <Loader2 className="size-4 shrink-0 animate-spin text-muted-foreground" />;
+  if (status === "background") return <Loader2 className="size-4 shrink-0 text-amber-500" />;
   if (status === "error") return <X className="size-4 shrink-0 text-red-600 dark:text-red-400" />;
   return null;
 }
