@@ -438,12 +438,14 @@ export default function FundsPage() {
     setLoading(true);
     setError(null);
     const qs = new URLSearchParams({ manager: managerId, fund: fundId, page: String(page), sort, dir });
-    // Always send the exact start/end data dates — every preset and custom range
-    // goes through the exact-date dashboard_changes RPC (compares real snapshots,
-    // excludes funds missing data on either endpoint). No matview default path.
+    // Always send start/end — every preset and custom range goes through the
+    // dashboard_changes RPC. 1D uses 'exact' (strict two-date, funds must have data
+    // on both); multi-day presets and custom ranges use 'anchor' (each fund vs its
+    // own nearest snapshot ~N days back). Never a matview default path.
     if (startDate && endDate) {
       qs.set("start", startDate);
       qs.set("end", endDate);
+      qs.set("mode", preset === "1D" ? "exact" : "anchor");
     }
     if (debFilters.ticker) qs.set("f_ticker", debFilters.ticker);
     if (debFilters.cusip) qs.set("f_cusip", debFilters.cusip);
@@ -472,7 +474,7 @@ export default function FundsPage() {
       })
       .finally(() => setLoading(false));
     return () => ctrl.abort();
-  }, [managerId, fundId, page, sort, dir, customRange, startDate, endDate, debFilters, refreshKey]);
+  }, [managerId, fundId, page, sort, dir, preset, customRange, startDate, endDate, debFilters, refreshKey]);
 
   function toggleSort(col: string) {
     if (sort === col) setDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -641,11 +643,11 @@ export default function FundsPage() {
             </Field>
           </div>
           <p className="mt-3 text-xs text-muted-foreground">
-            Par change &amp; type compare each fund&rsquo;s holdings on two actual data
-            dates. Funds without valid holdings on <em>both</em> the start and end date
-            are excluded (no fabricated changes).{" "}
+            {preset === "1D"
+              ? "1-day change: the two most recent data dates, comparing only funds that report on both (no fabricated changes)."
+              : "Each fund is compared against its own nearest snapshot in the window; funds with no valid prior are excluded (no fabricated changes). Funds that don't report daily populate as history accumulates."}{" "}
             {startDate && endDate
-              ? `Comparing ${startDate} → ${endDate}.`
+              ? `Window: ${startDate} → ${endDate}.`
               : "Not enough data dates to compare yet."}
             {importMsg && <span className="ml-1 font-medium text-foreground">{importMsg}</span>}
           </p>

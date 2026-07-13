@@ -48,6 +48,10 @@ export async function GET(request: Request) {
   const fund = searchParams.get("fund");
   const start = searchParams.get("start");
   const end = searchParams.get("end");
+  // 'exact' = strict two-date comparison (1D: include only funds with data on BOTH
+  // exact dates). 'anchor' = per-fund nearest-snapshot comparison for multi-day
+  // windows (each fund vs its own latest snapshot ~N days back). Default anchor.
+  const mode = searchParams.get("mode") === "exact" ? "exact" : "anchor";
   const page = Math.max(1, Number.parseInt(searchParams.get("page") ?? "1", 10) || 1);
   const from = (page - 1) * PAGE_SIZE;
   const to = from + PAGE_SIZE - 1;
@@ -102,6 +106,7 @@ export async function GET(request: Request) {
       p_dir: dir,
       p_limit: PAGE_SIZE,
       p_offset: from,
+      p_mode: mode,
     });
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     type ChangeRow = {
