@@ -10,20 +10,41 @@ export const runtime = "nodejs";
 // the app with a status flag.
 export async function GET(request: Request) {
   const url = new URL(request.url);
-  const site = process.env.NEXT_PUBLIC_SITE_URL || url.origin;
-  const back = (status: string) => NextResponse.redirect(`${site}/?google=${status}`);
+  // Redirect target: the configured OAuth origin (chat.mmglobal.us) — url.origin is
+  // unreliable behind the Cloudflare tunnel (it resolved to localhost:3000).
+  let site = process.env.NEXT_PUBLIC_SITE_URL || url.origin;
+  try {
+    if (process.env.GOOGLE_OAUTH_REDIRECT_URI) {
+      site = new URL(process.env.GOOGLE_OAUTH_REDIRECT_URI).origin;
+    }
+  } catch {
+    /* keep fallback */
+  }
+  const back = (status: string, reason?: string) =>
+    NextResponse.redirect(`${site}/?google=${status}${reason ? `&reason=${reason}` : ""}`);
 
-  if (url.searchParams.get("error")) return back("denied");
+  const gErr = url.searchParams.get("error");
+  if (gErr) {
+    console.error("[google-callback] provider error:", gErr);
+    return back("denied", gErr);
+  }
 
   const code = url.searchParams.get("code");
   const userId = verifyState(url.searchParams.get("state")); // null if forged/expired
-  if (!code || !userId) return back("error");
+  if (!code) {
+    console.error("[google-callback] no code param");
+    return back("error", "nocode");
+  }
+  if (!userId) {
+    console.error("[google-callback] state verification failed");
+    return back("error", "state");
+  }
 
   try {
     const tokens = await exchangeCodeForTokens(code);
     if (!tokens.refresh_token) {
-      // Should not happen with prompt=consent; without it we can't refresh later.
-      return back("error");
+      console.error("[google-callback] no refresh_token in exchange response");
+      return back("error", "norefresh");
     }
     const expiry = new Date(Date.now() + (tokens.expires_in ?? 3600) * 1000).toISOString();
     const { error } = await getSupabaseAdmin().from("google_credentials").upsert({
@@ -35,9 +56,14 @@ export async function GET(request: Request) {
       expiry,
       updated_at: new Date().toISOString(),
     });
-    if (error) return back("error");
+    if (error) {
+      console.error("[google-callback] upsert failed:", error.message);
+      return back("error", "store");
+    }
+    console.error("[google-callback] connected user", userId);
     return back("connected");
-  } catch {
-    return back("error");
+  } catch (e) {
+    console.error("[google-callback] exchange threw:", e instanceof Error ? e.message : String(e));
+    return back("error", "exchange");
   }
 }
