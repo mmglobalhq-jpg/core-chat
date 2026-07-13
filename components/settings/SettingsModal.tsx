@@ -8,8 +8,9 @@
  * admin-only /settings/admin page.
  */
 import { useEffect, useState } from "react";
-import { Check, ExternalLink, Loader2, Monitor, Settings, SlidersHorizontal, User } from "lucide-react";
+import { CalendarDays, Check, ExternalLink, Loader2, Monitor, Plug, Settings, SlidersHorizontal, User } from "lucide-react";
 import { useTheme } from "next-themes";
+import { supabase } from "@/lib/supabaseClient";
 import {
   Sheet,
   SheetContent,
@@ -22,7 +23,7 @@ import { useProfile } from "@/lib/useProfile";
 import { useIsAdmin } from "@/lib/useIsAdmin";
 import { cn } from "@/lib/utils";
 
-type Tab = "profile" | "preferences" | "desktop";
+type Tab = "profile" | "preferences" | "integrations" | "desktop";
 
 export function SettingsModal() {
   const [tab, setTab] = useState<Tab>("profile");
@@ -52,6 +53,9 @@ export function SettingsModal() {
           <TabButton active={tab === "preferences"} onClick={() => setTab("preferences")} icon={<SlidersHorizontal className="size-4" />}>
             Preferences
           </TabButton>
+          <TabButton active={tab === "integrations"} onClick={() => setTab("integrations")} icon={<Plug className="size-4" />}>
+            Integrations
+          </TabButton>
           {/* Admin-only Desktop tab. */}
           {isAdmin && (
             <TabButton active={tab === "desktop"} onClick={() => setTab("desktop")} icon={<Monitor className="size-4" />}>
@@ -63,6 +67,8 @@ export function SettingsModal() {
         <div className="p-4">
           {tab === "preferences" ? (
             <PreferencesTab />
+          ) : tab === "integrations" ? (
+            <IntegrationsTab />
           ) : tab === "desktop" && isAdmin ? (
             <DesktopTab />
           ) : (
@@ -173,6 +179,104 @@ function PreferencesTab() {
           );
         })}
       </div>
+    </div>
+  );
+}
+
+/** fetch() with the signed-in user's Supabase access token as a Bearer header. */
+async function authFetch(path: string, init?: RequestInit): Promise<Response> {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  return fetch(path, {
+    ...init,
+    headers: { ...(init?.headers ?? {}), Authorization: `Bearer ${session?.access_token ?? ""}` },
+  });
+}
+
+function IntegrationsTab() {
+  const [loading, setLoading] = useState(true);
+  const [connected, setConnected] = useState(false);
+  const [email, setEmail] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function refresh() {
+    setLoading(true);
+    try {
+      const d = await (await authFetch("/api/integrations/google/status")).json();
+      setConnected(!!d.connected);
+      setEmail(d.email ?? null);
+    } catch {
+      /* leave as disconnected */
+    }
+    setLoading(false);
+  }
+
+  useEffect(() => {
+    refresh();
+  }, []);
+
+  async function connect() {
+    setBusy(true);
+    try {
+      const d = await (await authFetch("/api/integrations/google/connect")).json();
+      if (d.url) {
+        window.location.href = d.url; // hand off to Google's consent screen
+        return;
+      }
+    } catch {
+      /* fall through */
+    }
+    setBusy(false);
+  }
+
+  async function disconnect() {
+    setBusy(true);
+    try {
+      await authFetch("/api/integrations/google/disconnect", { method: "POST" });
+    } catch {
+      /* best-effort */
+    }
+    await refresh();
+    setBusy(false);
+  }
+
+  return (
+    <div role="tabpanel" aria-label="Integrations" className="space-y-4">
+      <div className="rounded-xl border border-border bg-muted/30 p-4">
+        <div className="flex items-start gap-3">
+          <span className="inline-flex size-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+            <CalendarDays className="size-5" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium text-foreground">Google Calendar</p>
+            <p className="mt-0.5 truncate text-xs text-muted-foreground">
+              {loading
+                ? "Checking connection…"
+                : connected
+                  ? `Connected${email ? ` as ${email}` : ""}`
+                  : "View, create, and manage your events from chat."}
+            </p>
+          </div>
+        </div>
+        <div className="mt-3">
+          {loading ? null : connected ? (
+            <Button type="button" variant="outline" size="sm" onClick={disconnect} disabled={busy}>
+              {busy && <Loader2 className="size-4 animate-spin" />}
+              Disconnect
+            </Button>
+          ) : (
+            <Button type="button" size="sm" onClick={connect} disabled={busy}>
+              {busy && <Loader2 className="size-4 animate-spin" />}
+              Connect Google Calendar
+            </Button>
+          )}
+        </div>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Connecting lets the assistant view and manage your Google Calendar events on your behalf. You
+        can disconnect at any time, which also revokes this app&rsquo;s access.
+      </p>
     </div>
   );
 }
