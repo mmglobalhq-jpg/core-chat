@@ -35,6 +35,7 @@ export async function POST(request: Request) {
   let modelPreference: string;
   let history;
   let documentIds: string[] = [];
+  let timezone: string | null = null;
   try {
     const body = await request.json();
     text = typeof body?.text === "string" ? body.text : "";
@@ -43,6 +44,7 @@ export async function POST(request: Request) {
     documentIds = Array.isArray(body?.document_ids)
       ? body.document_ids.filter((d: unknown) => typeof d === "string").slice(0, 10)
       : [];
+    timezone = typeof body?.timezone === "string" ? body.timezone : null;
   } catch {
     return NextResponse.json({ error: "invalid request body" }, { status: 400 });
   }
@@ -56,6 +58,7 @@ export async function POST(request: Request) {
     raw_input: text,
     source: "core-chat-ui",
     model_preference: modelPreference,
+    timezone,
     history,
     document_ids: documentIds,
   };

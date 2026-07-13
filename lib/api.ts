@@ -66,8 +66,12 @@ export async function sendChat(
     method: "POST",
     headers: await authHeaders(),
     // `history` seeds prior turns; `document_ids` names attached docs whose
-    // extracted text the backend injects into the model's context.
-    body: JSON.stringify({ text, model, history, document_ids: docIds }),
+    // extracted text the backend injects into the model's context. `timezone` (the
+    // browser's IANA zone) grounds relative/partial dates like "the 20th" or "9am".
+    body: JSON.stringify({
+      text, model, history, document_ids: docIds,
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    }),
     signal,
   });
 
