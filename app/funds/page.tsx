@@ -123,6 +123,25 @@ function addDays(iso: string, n: number): string {
   return dt.toISOString().slice(0, 10);
 }
 
+/**
+ * Given the descending list of real data dates and a preset (days back from the
+ * latest data date), return the [start, end] pair of ACTUAL data dates to compare.
+ * End is always the latest data date. For 1D, start is the immediately-prior data
+ * date. For N-day presets, start is the most recent data date on-or-before
+ * `latest − N` calendar days; if history doesn't reach back that far, the oldest
+ * available date is used (widest real window). Returns null start if there's no
+ * prior date to compare against (so the caller sends no range → no rows, rather
+ * than fabricating a comparison against missing data).
+ */
+function presetWindow(dates: string[], days: number): { start: string | null; end: string | null } {
+  const end = dates[0] ?? null;
+  if (!end || dates.length < 2) return { start: null, end };
+  if (days <= 1) return { start: dates[1], end };
+  const target = addDays(end, -days);
+  const start = dates.find((d) => d <= target) ?? dates[dates.length - 1];
+  return { start, end };
+}
+
 type EnrichRow = {
   cusip: string;
   security_des: string | null;
@@ -269,6 +288,10 @@ export default function FundsPage() {
   const [managers, setManagers] = useState<Manager[]>([]);
   const [funds, setFunds] = useState<Fund[]>([]);
   const [latestDate, setLatestDate] = useState<string | null>(null);
+  // Distinct DATA dates (real holdings, ≥1 cusip), newest first. The window picker
+  // snaps to these actual dates so a preset compares real snapshots — never a
+  // calendar date the data skipped (weekends, holidays, non-daily funds, junk days).
+  const [dates, setDates] = useState<string[]>([]);
 
   const [managerId, setManagerId] = useState<string>(ALL);
   const [fundId, setFundId] = useState<string>(ALL);
@@ -370,10 +393,14 @@ export default function FundsPage() {
       .then((d) => {
         setManagers(d.managers ?? []);
         setFunds(d.funds ?? []);
-        if (d.latestDate) {
-          setLatestDate(d.latestDate);
-          setEndDate(d.latestDate);
-          setStartDate(addDays(d.latestDate, -1));
+        const ds: string[] = d.dates ?? [];
+        setDates(ds);
+        if (ds.length) {
+          setLatestDate(ds[0]);
+          // Default preset is 1D: latest data date vs the immediately-prior one.
+          const { start, end } = presetWindow(ds, 1);
+          if (end) setEndDate(end);
+          if (start) setStartDate(start);
         }
       })
       .catch(() => setError("Failed to load managers/funds."));
@@ -411,7 +438,10 @@ export default function FundsPage() {
     setLoading(true);
     setError(null);
     const qs = new URLSearchParams({ manager: managerId, fund: fundId, page: String(page), sort, dir });
-    if (customRange && startDate && endDate) {
+    // Always send the exact start/end data dates — every preset and custom range
+    // goes through the exact-date dashboard_changes RPC (compares real snapshots,
+    // excludes funds missing data on either endpoint). No matview default path.
+    if (startDate && endDate) {
       qs.set("start", startDate);
       qs.set("end", endDate);
     }
@@ -480,18 +510,11 @@ export default function FundsPage() {
 
   function applyPreset(key: string, days: number) {
     setPreset(key);
-    if (key === "1D") {
-      // default: latest vs previous snapshot (fast matview path)
-      setCustomRange(false);
-      if (latestDate) {
-        setEndDate(latestDate);
-        setStartDate(addDays(latestDate, -1));
-      }
-    } else if (latestDate) {
-      setCustomRange(true);
-      setEndDate(latestDate);
-      setStartDate(addDays(latestDate, -days));
-    }
+    setCustomRange(false); // preset window, not a hand-picked range
+    const { start, end } = presetWindow(dates, days);
+    if (end) setEndDate(end);
+    // Snap start to a real prior data date; clear it if none exists (→ no comparison).
+    setStartDate(start ?? "");
   }
 
   function editDate(which: "start" | "end", v: string) {
@@ -618,10 +641,12 @@ export default function FundsPage() {
             </Field>
           </div>
           <p className="mt-3 text-xs text-muted-foreground">
-            Par change &amp; type are computed per fund against its nearest prior snapshot (business days).{" "}
-            {customRange
-              ? `Range: ${startDate} → ${endDate}.`
-              : "Default: latest 1-day change vs each fund's previous snapshot (only when it's within ~2 weeks; funds with no recent prior snapshot show no change)."}
+            Par change &amp; type compare each fund&rsquo;s holdings on two actual data
+            dates. Funds without valid holdings on <em>both</em> the start and end date
+            are excluded (no fabricated changes).{" "}
+            {startDate && endDate
+              ? `Comparing ${startDate} → ${endDate}.`
+              : "Not enough data dates to compare yet."}
             {importMsg && <span className="ml-1 font-medium text-foreground">{importMsg}</span>}
           </p>
         </section>

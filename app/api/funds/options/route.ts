@@ -11,22 +11,21 @@ export const dynamic = "force-dynamic";
  */
 export async function GET() {
   const db = getSupabaseAdmin();
-  const [managersRes, fundsRes, latestRes] = await Promise.all([
+  const [managersRes, fundsRes, datesRes] = await Promise.all([
     db.from("fund_managers").select("id, canonical_name").order("canonical_name"),
     db.from("funds").select("id, ticker, fund_name, manager_id").order("ticker"),
-    // freshest data date, to seed the default End date box
-    db
-      .from("mv_current_changes")
-      .select("as_of_date")
-      .order("as_of_date", { ascending: false })
-      .limit(1)
-      .maybeSingle(),
+    // distinct DATA dates (with real holdings), newest first — the window picker uses
+    // these actual dates so 1D = the two most recent data dates and junk/partial days
+    // (0 cusips) are skipped.
+    db.rpc("get_dashboard_dates", { p_limit: 120 }),
   ]);
   const err = managersRes.error ?? fundsRes.error;
   if (err) return NextResponse.json({ error: err.message }, { status: 500 });
+  const dates = ((datesRes.data ?? []) as { as_of_date: string }[]).map((r) => r.as_of_date);
   return NextResponse.json({
     managers: managersRes.data ?? [],
     funds: fundsRes.data ?? [],
-    latestDate: latestRes.data?.as_of_date ?? null,
+    latestDate: dates[0] ?? null,
+    dates,
   });
 }
