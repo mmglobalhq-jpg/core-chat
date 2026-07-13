@@ -301,6 +301,8 @@ export default function FundsPage() {
   // true = explicit range sent to the live per-fund-anchored RPC.
   const [customRange, setCustomRange] = useState(false);
   const [preset, setPreset] = useState<string | null>("1D");
+  // Confirmed parse-drop artifacts are hidden by default; this reveals them.
+  const [showSuppressed, setShowSuppressed] = useState(false);
 
   const [sort, setSort] = useState<string>("par_change");
   const [dir, setDir] = useState<SortDir>("desc");
@@ -447,6 +449,7 @@ export default function FundsPage() {
       qs.set("end", endDate);
       qs.set("mode", preset === "1D" ? "exact" : "anchor");
     }
+    if (showSuppressed) qs.set("show_suppressed", "1");
     if (debFilters.ticker) qs.set("f_ticker", debFilters.ticker);
     if (debFilters.cusip) qs.set("f_cusip", debFilters.cusip);
     if (debFilters.description) qs.set("f_description", debFilters.description);
@@ -474,7 +477,7 @@ export default function FundsPage() {
       })
       .finally(() => setLoading(false));
     return () => ctrl.abort();
-  }, [managerId, fundId, page, sort, dir, preset, customRange, startDate, endDate, debFilters, refreshKey]);
+  }, [managerId, fundId, page, sort, dir, preset, customRange, startDate, endDate, debFilters, showSuppressed, refreshKey]);
 
   function toggleSort(col: string) {
     if (sort === col) setDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -641,6 +644,18 @@ export default function FundsPage() {
                 ))}
               </div>
             </Field>
+
+            <Field label="Data quality">
+              <label className="flex h-9 cursor-pointer items-center gap-2 text-sm text-muted-foreground">
+                <input
+                  type="checkbox"
+                  className="size-4 accent-primary"
+                  checked={showSuppressed}
+                  onChange={(e) => setShowSuppressed(e.target.checked)}
+                />
+                Show hidden artifacts
+              </label>
+            </Field>
           </div>
           <p className="mt-3 text-xs text-muted-foreground">
             {preset === "1D"
@@ -648,7 +663,9 @@ export default function FundsPage() {
               : "Each fund is compared against its own nearest snapshot in the window; funds with no valid prior are excluded (no fabricated changes). Funds that don't report daily populate as history accumulates."}{" "}
             {startDate && endDate
               ? `Window: ${startDate} → ${endDate}.`
-              : "Not enough data dates to compare yet."}
+              : "Not enough data dates to compare yet."}{" "}
+            Confirmed parse-drop artifacts (positions that flickered out of one snapshot)
+            are hidden{showSuppressed ? " — now shown" : ""}.
             {importMsg && <span className="ml-1 font-medium text-foreground">{importMsg}</span>}
           </p>
         </section>

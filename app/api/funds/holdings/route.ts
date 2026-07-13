@@ -52,6 +52,8 @@ export async function GET(request: Request) {
   // exact dates). 'anchor' = per-fund nearest-snapshot comparison for multi-day
   // windows (each fund vs its own latest snapshot ~N days back). Default anchor.
   const mode = searchParams.get("mode") === "exact" ? "exact" : "anchor";
+  // Confirmed artifacts (parse-drop flickers) are hidden by default; this reveals them.
+  const showSuppressed = searchParams.get("show_suppressed") === "1";
   const page = Math.max(1, Number.parseInt(searchParams.get("page") ?? "1", 10) || 1);
   const from = (page - 1) * PAGE_SIZE;
   const to = from + PAGE_SIZE - 1;
@@ -107,6 +109,7 @@ export async function GET(request: Request) {
       p_limit: PAGE_SIZE,
       p_offset: from,
       p_mode: mode,
+      p_show_suppressed: showSuppressed,
     });
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     type ChangeRow = {
