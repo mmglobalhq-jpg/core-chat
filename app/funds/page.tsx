@@ -321,7 +321,7 @@ export default function FundsPage() {
   const [error, setError] = useState<string | null>(null);
 
   const isAdmin = useIsAdmin();
-  const [exporting, setExporting] = useState(false);
+  const [exporting, setExporting] = useState<null | "missing" | "all">(null);
   const [importing, setImporting] = useState(false);
   const [importMsg, setImportMsg] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -358,15 +358,16 @@ export default function FundsPage() {
     }
   }
 
-  // Admin-only: download every distinct CUSIP as a CSV. Sends the caller's
-  // Supabase access token so the route's requireAdmin gate passes.
-  async function exportCusips() {
-    setExporting(true);
+  // Admin-only: download distinct CUSIPs as a CSV. scope="missing" exports only CUSIPs with
+  // no CSV-import data yet; scope="all" exports every CUSIP. Sends the caller's Supabase
+  // access token so the route's requireAdmin gate passes.
+  async function exportCusips(scope: "missing" | "all") {
+    setExporting(scope);
     try {
       const {
         data: { session },
       } = await supabase.auth.getSession();
-      const res = await fetch("/api/funds/cusips", {
+      const res = await fetch(`/api/funds/cusips?scope=${scope}`, {
         headers: { Authorization: `Bearer ${session?.access_token ?? ""}` },
       });
       if (!res.ok) throw new Error(String(res.status));
@@ -374,7 +375,7 @@ export default function FundsPage() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = "cusips.csv";
+      a.download = scope === "all" ? "cusips-all.csv" : "cusips-missing.csv";
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -384,7 +385,7 @@ export default function FundsPage() {
     } catch (e) {
       setError(`CUSIP export failed${e instanceof Error ? ` (${e.message})` : ""}.`);
     } finally {
-      setExporting(false);
+      setExporting(null);
     }
   }
 
@@ -576,11 +577,22 @@ export default function FundsPage() {
                 variant="outline"
                 size="sm"
                 className="gap-1.5"
-                onClick={exportCusips}
-                disabled={exporting}
+                onClick={() => exportCusips("missing")}
+                disabled={exporting !== null}
               >
                 <Download className="size-4" />
-                {exporting ? "Exporting…" : "Export Cusips"}
+                {exporting === "missing" ? "Exporting…" : "Export Missing Cusips"}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                onClick={() => exportCusips("all")}
+                disabled={exporting !== null}
+              >
+                <Download className="size-4" />
+                {exporting === "all" ? "Exporting…" : "Export All Cusips"}
               </Button>
             </>
           )}

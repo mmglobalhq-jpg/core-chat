@@ -13,20 +13,25 @@ function csv(value: string | null): string {
 }
 
 /**
- * ADMIN-ONLY: download every distinct CUSIP in the database (with its most recent
- * description + security type) as a CSV. Gated by requireAdmin — a non-admin
- * token gets 401/403 even though the UI hides the button.
+ * ADMIN-ONLY: download distinct CUSIPs (with their most recent description + security type)
+ * as a CSV. Gated by requireAdmin — a non-admin token gets 401/403 even though the UI hides
+ * the button. ?scope=missing (default) exports only CUSIPs with no CSV-import enrichment yet;
+ * ?scope=all exports every CUSIP.
  */
 export async function GET(request: Request) {
   const gate = await requireAdmin(request);
   if ("error" in gate) return gate.error;
+
+  const scope = new URL(request.url).searchParams.get("scope") === "all" ? "all" : "missing";
+  const rpcName = scope === "all" ? "export_cusips" : "export_cusips_missing";
+  const filename = scope === "all" ? "cusips-all.csv" : "cusips-missing.csv";
 
   // PostgREST caps a response at 1000 rows, so page through the full set.
   const db = getSupabaseAdmin();
   const CHUNK = 1000;
   const rows: CusipRow[] = [];
   for (let from = 0; ; from += CHUNK) {
-    const { data, error } = await db.rpc("export_cusips").range(from, from + CHUNK - 1);
+    const { data, error } = await db.rpc(rpcName).range(from, from + CHUNK - 1);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     const batch = (data ?? []) as CusipRow[];
     rows.push(...batch);
@@ -43,7 +48,7 @@ export async function GET(request: Request) {
     status: 200,
     headers: {
       "Content-Type": "text/csv; charset=utf-8",
-      "Content-Disposition": 'attachment; filename="cusips.csv"',
+      "Content-Disposition": `attachment; filename="${filename}"`,
       "Cache-Control": "no-store",
     },
   });
