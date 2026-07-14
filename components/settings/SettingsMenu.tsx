@@ -272,7 +272,7 @@ function DesktopSection() {
         <div>
           <p className="text-sm font-medium text-foreground">Remote Desktop Portal</p>
           <p className="mt-1 text-xs text-muted-foreground">
-            Opens the Guacamole desktop gateway in a new tab, behind Cloudflare Access.
+            Opens the Guacamole desktop gateway in a new tab.
           </p>
         </div>
         <Button asChild size="lg">
@@ -283,7 +283,7 @@ function DesktopSection() {
         </Button>
       </div>
       <p className="text-xs text-muted-foreground">
-        You&rsquo;ll authenticate through Cloudflare Access before the desktop loads. Admin-only.
+        Log in with your desktop credentials when it loads. Admin-only.
       </p>
     </div>
   );
