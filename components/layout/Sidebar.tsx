@@ -1,9 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { BarChart3, BookOpen, LogOut, PanelLeftClose, Plus, X } from "lucide-react";
+import { BookOpen, LogOut, PanelLeftClose, Plus, X } from "lucide-react";
 import {
   Sheet,
   SheetContent,
@@ -174,7 +173,7 @@ function SidebarBody({
         </div>
       </ScrollArea>
 
-      {/* Apps: links to the app pages — its own box, above settings. */}
+      {/* Apps: entry points to the app surfaces — its own box, above settings. */}
       <div className="mt-auto border-t border-sidebar-border p-2">
         <p className="px-2 py-1 text-xs font-medium text-muted-foreground">Apps</p>
         <Button
@@ -185,16 +184,6 @@ function SidebarBody({
         >
           <BookOpen className="size-4" />
           <span className="text-sm">Knowledge Base</span>
-        </Button>
-        <Button
-          asChild
-          variant="ghost"
-          className="w-full justify-start gap-2 text-sidebar-foreground"
-        >
-          <Link href="/funds">
-            <BarChart3 className="size-4" />
-            <span className="text-sm">Funds</span>
-          </Link>
         </Button>
       </div>
 
