@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { BookOpen, LogOut, PanelLeftClose, Plus, X } from "lucide-react";
+import { BarChart3, BookOpen, LogOut, PanelLeftClose, Plus, X } from "lucide-react";
 import {
   Sheet,
   SheetContent,
@@ -184,6 +185,16 @@ function SidebarBody({
         >
           <BookOpen className="size-4" />
           <span className="text-sm">Knowledge Base</span>
+        </Button>
+        <Button
+          asChild
+          variant="ghost"
+          className="w-full justify-start gap-2 text-sidebar-foreground"
+        >
+          <Link href="/funds">
+            <BarChart3 className="size-4" />
+            <span className="text-sm">Funds</span>
+          </Link>
         </Button>
       </div>
 
