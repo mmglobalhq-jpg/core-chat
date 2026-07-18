@@ -80,12 +80,177 @@ const CHANGES = {
   pagination: { page: 1, page_size: 100, total_rows: 2, total_pages: 1 },
 };
 
-function mockFetch(changes: unknown) {
+// A market-value-only fund: canonical position_* mirror market_value_*; par_* are null.
+// The second row exercises null sector ("Unmapped") and null security type ("—").
+const MV_CHANGES = {
+  changes: [
+    {
+      fund_manager: "Allspring",
+      fund_ticker: "AS_CORE_PLUS",
+      security_id: "MV0001",
+      description: "Corporate Note",
+      security_type: "Fixed Rate",
+      sector_type: "Corporate",
+      comparison_basis: "MARKET_VALUE",
+      position_amount: "5000000.0000000000",
+      position_change: "250000.0000000000",
+      par_amount: null,
+      par_change: null,
+      market_value_amount: "5000000.0000000000",
+      market_value_change: "250000.0000000000",
+      change_type: "Increased",
+      metadata_conflict: false,
+      conflict_fields: [],
+      conflict_reason: null,
+      requested_start_date: "2026-05-31",
+      requested_end_date: "2026-06-30",
+      actual_start_date: "2026-05-31",
+      actual_end_date: "2026-06-30",
+    },
+    {
+      fund_manager: "Allspring",
+      fund_ticker: "AS_CORE_PLUS",
+      security_id: "MV0002",
+      description: "Unmapped Holding",
+      security_type: null,
+      sector_type: null,
+      comparison_basis: "MARKET_VALUE",
+      position_amount: "100.0000000000",
+      position_change: "-40.0000000000",
+      par_amount: null,
+      par_change: null,
+      market_value_amount: "100.0000000000",
+      market_value_change: "-40.0000000000",
+      change_type: "Decreased",
+      metadata_conflict: false,
+      conflict_fields: [],
+      conflict_reason: null,
+      requested_start_date: "2026-05-31",
+      requested_end_date: "2026-06-30",
+      actual_start_date: "2026-05-31",
+      actual_end_date: "2026-06-30",
+    },
+  ],
+  fund_status: [
+    {
+      fund_manager: "Allspring",
+      fund_ticker: "AS_CORE_PLUS",
+      comparison_basis: "MARKET_VALUE",
+      requested_start_date: "2026-05-31",
+      requested_end_date: "2026-06-30",
+      actual_start_date: "2026-05-31",
+      actual_end_date: "2026-06-30",
+      status: "ok",
+      matching_row_count: 2,
+      warning_count: 0,
+      reason: null,
+    },
+  ],
+  pagination: { page: 1, page_size: 100, total_rows: 2, total_pages: 1 },
+};
+
+// A mixed-basis result: one PAR (JP) row + one MARKET_VALUE (Allspring) row.
+const MIXED_CHANGES = {
+  changes: [
+    {
+      fund_manager: "JP Morgan",
+      fund_ticker: "JBND",
+      security_id: "PAR001",
+      description: "Treasury",
+      security_type: "TREASURY NOTES",
+      sector_type: "UST",
+      comparison_basis: "PAR",
+      position_amount: "300.0000000000",
+      position_change: "300.0000000000",
+      par_amount: "300.0000000000",
+      par_change: "300.0000000000",
+      market_value_amount: null,
+      market_value_change: null,
+      change_type: "Added",
+      metadata_conflict: false,
+      conflict_fields: [],
+      conflict_reason: null,
+      requested_start_date: "2026-06-01",
+      requested_end_date: "2026-06-02",
+      actual_start_date: "2026-06-01",
+      actual_end_date: "2026-06-02",
+    },
+    {
+      fund_manager: "Allspring",
+      fund_ticker: "AS_CORE_PLUS",
+      security_id: "MV0001",
+      description: "Corporate Note",
+      security_type: "Fixed Rate",
+      sector_type: "Corporate",
+      comparison_basis: "MARKET_VALUE",
+      position_amount: "5000000.0000000000",
+      position_change: "250000.0000000000",
+      par_amount: null,
+      par_change: null,
+      market_value_amount: "5000000.0000000000",
+      market_value_change: "250000.0000000000",
+      change_type: "Increased",
+      metadata_conflict: false,
+      conflict_fields: [],
+      conflict_reason: null,
+      requested_start_date: "2026-05-31",
+      requested_end_date: "2026-06-30",
+      actual_start_date: "2026-05-31",
+      actual_end_date: "2026-06-30",
+    },
+  ],
+  fund_status: [
+    {
+      fund_manager: "JP Morgan",
+      fund_ticker: "JBND",
+      comparison_basis: "PAR",
+      requested_start_date: "2026-06-01",
+      requested_end_date: "2026-06-02",
+      actual_start_date: "2026-06-01",
+      actual_end_date: "2026-06-02",
+      status: "ok",
+      matching_row_count: 1,
+      warning_count: 0,
+      reason: null,
+    },
+    {
+      fund_manager: "Allspring",
+      fund_ticker: "AS_CORE_PLUS",
+      comparison_basis: "MARKET_VALUE",
+      requested_start_date: "2026-05-31",
+      requested_end_date: "2026-06-30",
+      actual_start_date: "2026-05-31",
+      actual_end_date: "2026-06-30",
+      status: "ok",
+      matching_row_count: 1,
+      warning_count: 0,
+      reason: null,
+    },
+  ],
+  pagination: { page: 1, page_size: 100, total_rows: 2, total_pages: 1 },
+};
+
+const ALLSPRING_OPTIONS = {
+  managers: ["Allspring", "JP Morgan"],
+  funds: [
+    { ticker: "AS_CORE_PLUS", fund_manager: "Allspring" },
+    { ticker: "JBND", fund_manager: "JP Morgan" },
+  ],
+  latestDate: "2026-06-30",
+};
+
+const DEFAULT_FILTER = { security_types: ["TREASURY NOTES"], sector_types: ["UST"], sector_has_null: false };
+
+function mockFetch(
+  changes: unknown,
+  opts: { options?: unknown; filterOptions?: unknown } = {},
+) {
+  const options = opts.options ?? OPTIONS;
+  const filterOptions = opts.filterOptions ?? DEFAULT_FILTER;
   return vi.fn(async (url: string) => {
-    if (url.startsWith("/api/funds/options")) return jsonResponse(OPTIONS);
+    if (url.startsWith("/api/funds/options")) return jsonResponse(options);
     if (url.startsWith("/api/funds/latest-date")) return jsonResponse({ latestDate: "2026-06-02" });
-    if (url.startsWith("/api/funds/filter-options"))
-      return jsonResponse({ security_types: ["TREASURY NOTES"], sector_types: ["UST"] });
+    if (url.startsWith("/api/funds/filter-options")) return jsonResponse(filterOptions);
     if (url.startsWith("/api/funds/changes")) return jsonResponse(changes);
     return jsonResponse({});
   });
@@ -155,5 +320,67 @@ describe("Fund Manager page", () => {
     expect(
       await screen.findByText(/No position changes found for the resolved dates\./i),
     ).toBeInTheDocument();
+  });
+
+  it("PAR-only mode: Par labels, no Basis column, no market-value disclosure", async () => {
+    currentParams = new URLSearchParams({ start: "2026-06-01", end: "2026-06-02" });
+    vi.stubGlobal("fetch", mockFetch(CHANGES));
+    render(<FundsPage />);
+    expect(await screen.findByText("Par Amount")).toBeInTheDocument();
+    expect(screen.getByText("Par Change")).toBeInTheDocument();
+    expect(screen.queryByText("Basis")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/do not necessarily represent purchases or sales/i),
+    ).not.toBeInTheDocument();
+  });
+
+  it("MARKET_VALUE-only mode: Market Value labels, disclosure, Unmapped + em dash, no Basis column", async () => {
+    currentParams = new URLSearchParams({ start: "2026-05-31", end: "2026-06-30" });
+    vi.stubGlobal(
+      "fetch",
+      mockFetch(MV_CHANGES, {
+        options: ALLSPRING_OPTIONS,
+        filterOptions: { security_types: ["Fixed Rate"], sector_types: ["Corporate"], sector_has_null: true },
+      }),
+    );
+    render(<FundsPage />);
+    expect(await screen.findByText("Market Value")).toBeInTheDocument();
+    expect(screen.getByText("Market Value Change")).toBeInTheDocument();
+    // No Basis column for a single-basis result.
+    expect(screen.queryByText("Basis")).not.toBeInTheDocument();
+    // Disclosure note visible for market-value results.
+    expect(
+      screen.getByText(/do not necessarily represent purchases or sales/i),
+    ).toBeInTheDocument();
+    // Null sector renders as "Unmapped" (cell + the sector filter option); null
+    // security type renders as an em dash.
+    expect(screen.getAllByText("Unmapped").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("mixed mode: Position labels, a visible Basis column (Par / Market Value), and the disclosure", async () => {
+    currentParams = new URLSearchParams({ start: "2026-05-31", end: "2026-06-30" });
+    vi.stubGlobal("fetch", mockFetch(MIXED_CHANGES, { options: ALLSPRING_OPTIONS }));
+    render(<FundsPage />);
+    expect(await screen.findByText("Position Amount")).toBeInTheDocument();
+    expect(screen.getByText("Position Change")).toBeInTheDocument();
+    // The Basis column header and both basis labels appear only in mixed mode.
+    expect(screen.getByText("Basis")).toBeInTheDocument();
+    expect(screen.getByText("Par")).toBeInTheDocument();
+    expect(screen.getByText("Market Value")).toBeInTheDocument();
+    expect(
+      screen.getByText(/do not necessarily represent purchases or sales/i),
+    ).toBeInTheDocument();
+  });
+
+  it("canonicalises the Allspring fund dropdown to one friendly option with alias hints", async () => {
+    vi.stubGlobal("fetch", mockFetch(CHANGES, { options: ALLSPRING_OPTIONS }));
+    render(<FundsPage />);
+    const option = await screen.findByRole("option", { name: /Core Plus Bond/ });
+    expect(option).toBeInTheDocument();
+    expect(option).toHaveTextContent("STYAX / WIPIX / WFIPX");
+    // The share-class aliases are never separate fund options.
+    expect(screen.queryByRole("option", { name: /^STYAX$/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /^WIPIX$/ })).not.toBeInTheDocument();
   });
 });

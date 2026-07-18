@@ -43,9 +43,20 @@ import {
   ALLOWED_PAGE_SIZES,
   CHANGE_TYPES,
   DEFAULT_PAGE_SIZE,
+  DEFAULT_SORT_COLUMN,
+  MARKET_VALUE_DISCLOSURE,
+  UNMAPPED_LABEL,
+  UNMAPPED_TOKEN,
+  formatSecurityType,
+  fundDisplayLabel,
+  getAmountLabels,
+  getBasisLabel,
+  getComparisonMode,
+  normalizePositionChangeRow,
   truncateDecimalTowardZero,
   type ChangeRow,
   type ChangesResponse,
+  type ComparisonMode,
   type FundStatus,
 } from "@/lib/fundManager";
 
@@ -58,8 +69,9 @@ type ColKey =
   | "description"
   | "security_type"
   | "sector_type"
-  | "par_amount"
-  | "par_change"
+  | "position_amount"
+  | "position_change"
+  | "comparison_basis"
   | "change_type";
 
 type ColDef = {
@@ -71,19 +83,26 @@ type ColDef = {
   sortable?: boolean;
 };
 
+// position_amount/position_change labels are basis-aware at render (see labelFor);
+// comparison_basis (Basis) is shown only for mixed-basis results.
 const COLUMNS: ColDef[] = [
   { key: "fund_ticker", label: "Fund", align: "left", w: 90, pinned: true },
   { key: "security_id", label: "CUSIP / Security ID", align: "left", w: 170, pinned: true, sortable: true },
   { key: "description", label: "Description", align: "left", w: 280, sortable: true },
   { key: "security_type", label: "Security Type", align: "left", w: 150, sortable: true },
   { key: "sector_type", label: "Sector Type", align: "left", w: 120, sortable: true },
-  { key: "par_amount", label: "Par Amount", align: "right", w: 150, sortable: true },
-  { key: "par_change", label: "Par Change", align: "right", w: 150, sortable: true },
+  { key: "position_amount", label: "Position Amount", align: "right", w: 150, sortable: true },
+  { key: "position_change", label: "Position Change", align: "right", w: 150, sortable: true },
+  { key: "comparison_basis", label: "Basis", align: "left", w: 110 },
   { key: "change_type", label: "Change Type", align: "left", w: 160, sortable: true },
 ];
 const COL_BY_KEY = Object.fromEntries(COLUMNS.map((c) => [c.key, c])) as Record<ColKey, ColDef>;
 const PINNED: ColKey[] = COLUMNS.filter((c) => c.pinned).map((c) => c.key);
-const NON_PINNED: ColKey[] = COLUMNS.filter((c) => !c.pinned).map((c) => c.key);
+// The Basis column is auto-managed (shown only for mixed results), so it is kept
+// out of the reorder / show-hide machinery.
+const NON_PINNED: ColKey[] = COLUMNS.filter(
+  (c) => !c.pinned && c.key !== "comparison_basis",
+).map((c) => c.key);
 const LAYOUT_KEY = "fundmgr:layout";
 
 type Layout = { order: ColKey[]; hidden: ColKey[]; widths: Partial<Record<ColKey, number>> };
@@ -211,6 +230,7 @@ function FundManagerPage() {
   const [allFunds, setAllFunds] = useState<{ ticker: string; fund_manager: string }[]>([]);
   const [securityTypes, setSecurityTypes] = useState<string[]>([]);
   const [sectorTypes, setSectorTypes] = useState<string[]>([]);
+  const [sectorHasNull, setSectorHasNull] = useState(false);
 
   // Draft top-controls (edited but not executed until Submit).
   const [draft, setDraft] = useState<Committed>(committed);
@@ -303,6 +323,7 @@ function FundManagerPage() {
       .then((d) => {
         setSecurityTypes(d.security_types ?? []);
         setSectorTypes(d.sector_types ?? []);
+        setSectorHasNull(Boolean(d.sector_has_null));
       })
       .catch(() => {});
   }, [hasQuery, committed.manager, committed.fund]);
@@ -327,7 +348,15 @@ function FundManagerPage() {
         return body as ChangesResponse;
       })
       .then((d) => {
-        if (id === reqId.current) setData(d);
+        // Normalize each row (basis-aware; legacy par-only fallback) once here so
+        // the table, summary, and export all read position_* consistently.
+        const normalized: ChangesResponse = {
+          ...d,
+          changes: (d.changes ?? []).map((r) =>
+            normalizePositionChangeRow(r as unknown as Record<string, unknown>),
+          ),
+        };
+        if (id === reqId.current) setData(normalized);
       })
       .catch((e: unknown) => {
         if (e instanceof DOMException && e.name === "AbortError") return;
@@ -411,15 +440,32 @@ function FundManagerPage() {
 
   const dateRangeInvalid = Boolean(draft.start && draft.end && draft.start > draft.end);
 
-  // Visible, ordered columns (pinned first, then persisted order minus hidden).
-  const visibleCols: ColKey[] = useMemo(
-    () => [...PINNED, ...layout.order.filter((k) => !layout.hidden.includes(k))],
-    [layout],
+  // Result comparison mode (par / market_value / mixed) drives labels + the Basis column.
+  const mode: ComparisonMode = useMemo(
+    () => getComparisonMode(data?.changes ?? [], data?.fund_status ?? []),
+    [data],
   );
+  const amountLabels = getAmountLabels(mode);
+  /** Basis-aware header label for a column key. */
+  const labelFor = (k: ColKey): string => {
+    if (k === "position_amount") return amountLabels.amount;
+    if (k === "position_change") return amountLabels.change;
+    return COL_BY_KEY[k].label;
+  };
+
+  // Visible, ordered columns (pinned first, then persisted order minus hidden). The
+  // Basis column is force-inserted (before Change Type) only for mixed-basis results.
+  const visibleCols: ColKey[] = useMemo(() => {
+    const ordered = [...PINNED, ...layout.order.filter((k) => !layout.hidden.includes(k))];
+    if (mode !== "mixed") return ordered;
+    const at = ordered.indexOf("change_type");
+    const idx = at >= 0 ? at : ordered.length;
+    return [...ordered.slice(0, idx), "comparison_basis", ...ordered.slice(idx)];
+  }, [layout, mode]);
   const widthOf = (k: ColKey) => layout.widths[k] ?? COL_BY_KEY[k].w;
   const totalWidth = visibleCols.reduce((a, k) => a + widthOf(k), 0);
 
-  const sort = sp.get("sort") ?? "par_change";
+  const sort = sp.get("sort") ?? DEFAULT_SORT_COLUMN;
   const dir = sp.get("dir") ?? "desc";
   const pageSize = Number(sp.get("page_size") ?? DEFAULT_PAGE_SIZE);
   const page = Number(sp.get("page") ?? 1);
@@ -427,10 +473,12 @@ function FundManagerPage() {
 
   function toggleSort(col: ColKey) {
     if (!COL_BY_KEY[col].sortable) return;
+    // Column keys are already the whitelisted basis-aware RPC sort keys: the amount
+    // column IS `position_amount` and the change column IS `position_change`.
     if (sort === col) {
       patchUrl({ dir: dir === "asc" ? "desc" : "asc" }, "replace");
     } else {
-      const initialDir = col === "par_amount" || col === "par_change" ? "desc" : "asc";
+      const initialDir = col === "position_amount" || col === "position_change" ? "desc" : "asc";
       patchUrl({ sort: col, dir: initialDir }, "replace");
     }
   }
@@ -593,11 +641,16 @@ function FundManagerPage() {
               onChange={(e) => setDraft((d) => ({ ...d, fund: e.target.value }))}
             >
               <option value="">All Funds</option>
-              {fundsForManager.map((f) => (
-                <option key={f.ticker} value={f.ticker}>
-                  {f.ticker}
-                </option>
-              ))}
+              {fundsForManager.map((f) => {
+                const d = fundDisplayLabel(f.ticker);
+                const aliasHint = d.aliases.length ? ` (${d.aliases.join(" / ")})` : "";
+                return (
+                  <option key={f.ticker} value={f.ticker} title={d.aliases.join(" / ")}>
+                    {d.label}
+                    {aliasHint}
+                  </option>
+                );
+              })}
             </select>
           </Field>
 
@@ -699,6 +752,8 @@ function FundManagerPage() {
                     {t}
                   </option>
                 ))}
+                {/* Null-sector rows: shown as "Unmapped", sent to the RPC as __UNMAPPED__. */}
+                {sectorHasNull && <option value={UNMAPPED_TOKEN}>{UNMAPPED_LABEL}</option>}
               </select>
               <ChangeTypeMenu active={activeChangeTypes} onToggle={toggleChangeType} />
               {activeChangeTypes.length > 0 && (
@@ -712,6 +767,16 @@ function FundManagerPage() {
                 </Button>
               )}
             </div>
+
+            {/* Market-value disclosure — shown for MARKET_VALUE-only and mixed results. */}
+            {(mode === "market_value" || mode === "mixed") && (
+              <div
+                className="border-b border-border bg-amber-50 px-4 py-2 text-xs text-amber-900 dark:bg-amber-950/40 dark:text-amber-200"
+                role="note"
+              >
+                {MARKET_VALUE_DISCLOSURE}
+              </div>
+            )}
 
             {/* Per-fund status notices (insufficient history / no snapshot). */}
             {problemFunds.length > 0 && (
@@ -761,7 +826,7 @@ function FundManagerPage() {
                               c.align === "right" && "flex-row-reverse",
                             )}
                           >
-                            {c.label}
+                            {labelFor(k)}
                             {c.sortable &&
                               (active ? (
                                 dir === "asc" ? (
@@ -778,7 +843,7 @@ function FundManagerPage() {
                             className="absolute right-0 top-0 h-full w-1.5 cursor-col-resize touch-none select-none hover:bg-primary/50"
                             role="separator"
                             aria-orientation="vertical"
-                            aria-label={`Resize ${c.label} column`}
+                            aria-label={`Resize ${labelFor(k)} column`}
                           />
                         </th>
                       );
@@ -1024,38 +1089,52 @@ function Cell({
     case "security_type":
       content = (
         <>
-          {row.security_type ?? ""}
+          {/* Missing security type → em dash (never a sector/issuer substitute). */}
+          {row.security_type == null ? (
+            <span className="text-muted-foreground">{formatSecurityType(null)}</span>
+          ) : (
+            row.security_type
+          )}
           {conflicts.has("security_type") && <ConflictMark reason={row.conflict_reason} />}
         </>
       );
       break;
-    case "sector_type":
+    case "sector_type": {
+      const unmapped = row.sector_type == null && row.change_type !== "Metadata Conflict";
       className = cn(
         base,
         row.change_type === "Metadata Conflict" && "text-amber-600 dark:text-amber-400",
+        unmapped && "text-muted-foreground italic",
       );
       content = (
         <>
-          {row.sector_type ?? ""}
+          {/* Null sector → "Unmapped" (never stored). */}
+          {row.sector_type == null && row.change_type !== "Metadata Conflict"
+            ? UNMAPPED_LABEL
+            : (row.sector_type ?? "")}
           {conflicts.has("sector_type") && <ConflictMark reason={row.conflict_reason} />}
         </>
       );
       break;
-    case "par_amount":
+    }
+    case "position_amount":
       className = cn(base, "text-right font-mono tabular-nums");
-      content = row.par_amount == null ? "—" : truncateDecimalTowardZero(row.par_amount);
+      content = row.position_amount == null ? "—" : truncateDecimalTowardZero(row.position_amount);
       break;
-    case "par_change": {
-      const neg = (row.par_change ?? "").trim().startsWith("-");
+    case "position_change": {
+      const neg = (row.position_change ?? "").trim().startsWith("-");
       className = cn(
         base,
         "text-right font-mono tabular-nums",
-        row.par_change != null && !neg && "text-emerald-600 dark:text-emerald-400",
-        row.par_change != null && neg && "text-red-600 dark:text-red-400",
+        row.position_change != null && !neg && "text-emerald-600 dark:text-emerald-400",
+        row.position_change != null && neg && "text-red-600 dark:text-red-400",
       );
-      content = row.par_change == null ? "—" : truncateDecimalTowardZero(row.par_change);
+      content = row.position_change == null ? "—" : truncateDecimalTowardZero(row.position_change);
       break;
     }
+    case "comparison_basis":
+      content = <span className="text-muted-foreground">{getBasisLabel(row.comparison_basis)}</span>;
+      break;
     case "change_type": {
       const meta = CHANGE_META[row.change_type];
       const Icon = meta?.icon;

@@ -1,12 +1,51 @@
 # Fund Manager (chat.mmglobal.us)
 
 The **Fund Manager** page (`/funds`, linked from the sidebar **Apps → Funds**)
-compares JP Morgan fund holdings between two requested dates and classifies each
-position as **Added / Removed / Increased / Decreased / Metadata Conflict**.
+compares fund holdings between two requested dates and classifies each position as
+**Added / Removed / Increased / Decreased / Metadata Conflict**. It supports both
+**JP Morgan** (par-based) and **Allspring** (market-value-based) managers.
 
 All comparison logic lives in the poller's PostgreSQL RPCs (see the poller repo's
 README, "Fund Manager position-change RPCs"). This app only authenticates the chat
 user, validates inputs, calls those RPCs server-side, and renders the result.
+
+## Comparison basis (PAR vs MARKET_VALUE)
+
+Each row carries a `comparison_basis` of `PAR` or `MARKET_VALUE`, and a canonical
+basis-aware pair `position_amount` / `position_change` (the values the table and CSV
+always render). For PAR rows `position_*` mirror `par_*` (and `market_value_*` are
+null); for MARKET_VALUE rows `position_*` mirror `market_value_*` (and `par_*` are
+null). All amounts stay full-precision decimal **strings** end-to-end — never coerced
+to a JS number — through the route, sorting, and CSV export.
+
+The table derives a **mode** from the returned rows (or `fund_status`):
+
+| Mode | When | Amount / Change headers | Basis column | Disclosure note |
+|---|---|---|---|---|
+| `par` | all rows PAR (or legacy) | Par Amount / Par Change | hidden | no |
+| `market_value` | all rows MARKET_VALUE | Market Value / Market Value Change | hidden | **yes** |
+| `mixed` | both bases present | Position Amount / Position Change | **shown** (Par / Market Value) | **yes** |
+
+**Market-value disclosure** (shown near the table for `market_value` and `mixed`):
+"Market value changes can reflect price movement, accrued interest, foreign exchange
+effects, and portfolio activity. They do not necessarily represent purchases or
+sales."
+
+**Backward compatibility:** a legacy response lacking `position_*` is normalised
+(`normalizePositionChangeRow`) to `position_amount = par_amount`,
+`position_change = par_change`, `comparison_basis = PAR`. The fallback only fills
+absent keys — it never overrides valid new fields.
+
+**Null sectors / security types:** a null `sector_type` displays as **Unmapped**
+(rows stay visible, sortable, filterable, paginated, exported, and counted); the
+sector filter offers "Unmapped" only when `sector_has_null` is true, and selecting it
+sends the token `__UNMAPPED__` to the RPC. The literal string "Unmapped" is never
+sent or stored. A null `security_type` displays as an em dash (—) with no sector or
+issuer substitution.
+
+**Allspring fund dropdown:** each canonical portfolio appears once with a friendly
+name (e.g. *Core Plus Bond*), share-class aliases (STYAX / WIPIX / WFIPX) shown as
+secondary text and a tooltip. The share-class tickers are never separate options.
 
 ## Architecture
 
@@ -52,7 +91,7 @@ it and cannot write to holdings data.
 | `/api/funds/options` | GET | `get_fund_managers`, `get_funds`, `get_fund_latest_as_of_date` | `{ managers, funds, latestDate }` |
 | `/api/funds/list?manager=` | GET | `get_funds` | `{ funds }` |
 | `/api/funds/latest-date?manager=&fund=` | GET | `get_fund_latest_as_of_date` | `{ latestDate }` |
-| `/api/funds/filter-options?manager=&fund=` | GET | `get_fund_filter_options` | `{ security_types, sector_types }` |
+| `/api/funds/filter-options?manager=&fund=` | GET | `get_fund_filter_options` | `{ security_types, sector_types, sector_has_null }` |
 | `/api/funds/changes?…` | GET | `get_fund_position_changes` | `{ changes, fund_status, pagination }` |
 | `/api/funds/export?…` | GET | `get_fund_position_changes_export` | streamed `text/csv` |
 
@@ -70,10 +109,10 @@ back/forward work. The changes route reads the same names (minus `preset`):
 | `preset` | `1D` / `7D` / `30D` / `1Y` (UI hint only, not sent to the RPC) |
 | `page` | 1-based page |
 | `page_size` | one of `50, 100, 250, 500` (others rejected `400`) |
-| `sort` | one of `security_id, description, security_type, sector_type, par_amount, par_change, change_type` |
+| `sort` | one of `security_id, description, security_type, sector_type, position_amount, position_change, par_amount, par_change, market_value_amount, market_value_change, change_type` (default `position_change`, abs-desc). The amount/change column headers map to `position_amount` / `position_change`; arbitrary UI labels are never used as sort keys. |
 | `dir` | `asc` / `desc` |
 | `q_security`, `q_description` | case-insensitive partial text filters (debounced 300 ms) |
-| `f_security_type`, `f_sector_type` | exact dropdown filters |
+| `f_security_type`, `f_sector_type` | exact dropdown filters; `f_sector_type=__UNMAPPED__` selects null-sector rows |
 | `change_type` | comma-joined subset of the five change types |
 
 Top controls (manager/fund/dates/preset) require **Submit** to execute; once a
@@ -83,11 +122,19 @@ server-driven. No sensitive data is placed in the URL.
 ## CSV export
 
 `/api/funds/export` streams every matching row (all funds/pages, including Metadata
-Conflict rows) with full `NUMERIC(38,10)` precision. If the result exceeds
-`FUNDS_EXPORT_MAX_ROWS` the export is **blocked** up-front with a clear message
-asking the user to narrow the query — never silently truncated. The response is
-streamed in bounded chunks so neither the server nor the browser holds the whole
+Conflict and null-sector rows) with full `NUMERIC(38,10)` precision. If the result
+exceeds `FUNDS_EXPORT_MAX_ROWS` the export is **blocked** up-front with a clear
+message asking the user to narrow the query — never silently truncated. The response
+is streamed in bounded chunks so neither the server nor the browser holds the whole
 export in memory.
+
+Headers are **basis-aware** (from a pre-flight probe): PAR-only uses `Par Amount` /
+`Par Change`; MARKET_VALUE-only uses `Market Value` / `Market Value Change`; mixed
+uses `Position Amount` / `Position Change` plus a `Comparison Basis` column
+(`PAR`→Par, `MARKET_VALUE`→Market Value). Values always come from
+`position_amount` / `position_change` as exact decimal strings (never floated). Null
+sectors export as **Unmapped**; null security types export **blank** (matching the
+existing `""` convention).
 
 ## Column / group persistence
 
@@ -105,7 +152,9 @@ pnpm dev                           # http://localhost:3000/funds
 
 Without `FUNDS_*` set, the `/api/funds/*` routes return a 502; the page renders but
 shows a load error. Point `FUNDS_SUPABASE_URL`/`FUNDS_SUPABASE_SERVICE_ROLE_KEY` at
-a poller project that has the `0003_position_changes_rpc` migration applied.
+a poller project that has the `0004_comparison_basis` migration applied (adds the
+basis-aware RPC contract: `comparison_basis`, `position_*`, `market_value_*`, and
+`sector_has_null`).
 
 ## Tests
 

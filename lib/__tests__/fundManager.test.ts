@@ -7,6 +7,15 @@ import {
   truncateDecimalTowardZero,
   ALLOWED_PAGE_SIZES,
   DEFAULT_PAGE_SIZE,
+  getComparisonMode,
+  getAmountLabels,
+  getBasisLabel,
+  formatSector,
+  formatSecurityType,
+  normalizePositionChangeRow,
+  fundDisplayLabel,
+  UNMAPPED_TOKEN,
+  UNMAPPED_LABEL,
 } from "@/lib/fundManager";
 
 function sp(obj: Record<string, string | string[]>): URLSearchParams {
@@ -45,7 +54,7 @@ describe("validateChangesQuery", () => {
     expect(r.value.p_fund).toBeNull();
     expect(r.value.p_page).toBe(1);
     expect(r.value.p_page_size).toBe(DEFAULT_PAGE_SIZE);
-    expect(r.value.p_sort_column).toBe("par_change");
+    expect(r.value.p_sort_column).toBe("position_change"); // basis-aware default
     expect(r.value.p_sort_direction).toBe("desc");
     expect(r.value.p_change_types).toBeNull();
   });
@@ -153,5 +162,153 @@ describe("truncateDecimalTowardZero", () => {
     expect(truncateDecimalTowardZero("1234567890123456789012345679.1234567890")).toBe(
       "1,234,567,890,123,456,789,012,345,679",
     );
+  });
+});
+
+describe("validateChangesQuery — basis-aware sort whitelist", () => {
+  const base = { start: "2026-06-01", end: "2026-06-02" };
+
+  it("accepts position_amount / position_change / market_value_* sort columns", () => {
+    for (const col of [
+      "position_amount",
+      "position_change",
+      "market_value_amount",
+      "market_value_change",
+      "par_amount",
+      "par_change",
+    ]) {
+      const r = validateChangesQuery(sp({ ...base, sort: col }));
+      expect(r.ok).toBe(true);
+      if (r.ok) expect(r.value.p_sort_column).toBe(col);
+    }
+  });
+
+  it("rejects an arbitrary UI label as a sort column", () => {
+    expect(validateChangesQuery(sp({ ...base, sort: "Par Change" })).ok).toBe(false);
+    expect(validateChangesQuery(sp({ ...base, sort: "market value" })).ok).toBe(false);
+  });
+
+  it("passes the __UNMAPPED__ null-sector token through untouched", () => {
+    const r = validateChangesQuery(sp({ ...base, f_sector_type: UNMAPPED_TOKEN }));
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.value.p_sector_type).toBe(UNMAPPED_TOKEN);
+  });
+});
+
+describe("getComparisonMode", () => {
+  const parRow = { comparison_basis: "PAR" } as never;
+  const mvRow = { comparison_basis: "MARKET_VALUE" } as never;
+
+  it("returns 'par' for PAR-only rows", () => {
+    expect(getComparisonMode([parRow, parRow])).toBe("par");
+  });
+  it("returns 'market_value' for MARKET_VALUE-only rows", () => {
+    expect(getComparisonMode([mvRow, mvRow])).toBe("market_value");
+  });
+  it("returns 'mixed' when both bases appear", () => {
+    expect(getComparisonMode([parRow, mvRow])).toBe("mixed");
+  });
+  it("falls back to fund_status when there are no rows", () => {
+    expect(getComparisonMode([], [{ comparison_basis: "MARKET_VALUE" } as never])).toBe("market_value");
+    expect(
+      getComparisonMode(
+        [],
+        [{ comparison_basis: "PAR" } as never, { comparison_basis: "MARKET_VALUE" } as never],
+      ),
+    ).toBe("mixed");
+  });
+  it("defaults to 'par' with no rows and no status", () => {
+    expect(getComparisonMode([], [])).toBe("par");
+  });
+});
+
+describe("getAmountLabels", () => {
+  it("labels PAR mode as Par Amount / Par Change", () => {
+    expect(getAmountLabels("par")).toEqual({ amount: "Par Amount", change: "Par Change" });
+  });
+  it("labels MARKET_VALUE mode as Market Value / Market Value Change", () => {
+    expect(getAmountLabels("market_value")).toEqual({
+      amount: "Market Value",
+      change: "Market Value Change",
+    });
+  });
+  it("labels mixed mode as Position Amount / Position Change", () => {
+    expect(getAmountLabels("mixed")).toEqual({ amount: "Position Amount", change: "Position Change" });
+  });
+});
+
+describe("getBasisLabel", () => {
+  it("maps MARKET_VALUE -> Market Value, everything else -> Par", () => {
+    expect(getBasisLabel("MARKET_VALUE")).toBe("Market Value");
+    expect(getBasisLabel("PAR")).toBe("Par");
+  });
+});
+
+describe("formatSector / formatSecurityType", () => {
+  it("renders null sector as Unmapped, otherwise the value", () => {
+    expect(formatSector(null)).toBe(UNMAPPED_LABEL);
+    expect(formatSector("Corporate")).toBe("Corporate");
+  });
+  it("renders null security type as an em dash, otherwise the value", () => {
+    expect(formatSecurityType(null)).toBe("—");
+    expect(formatSecurityType("Fixed Rate")).toBe("Fixed Rate");
+  });
+});
+
+describe("normalizePositionChangeRow", () => {
+  it("preserves new basis-aware fields verbatim (exact decimal strings)", () => {
+    const raw = {
+      comparison_basis: "MARKET_VALUE",
+      position_amount: "1234567890123456789.1234567890",
+      position_change: "-98765432109876543.9876543210",
+      par_amount: null,
+      par_change: null,
+      market_value_amount: "1234567890123456789.1234567890",
+      market_value_change: "-98765432109876543.9876543210",
+    };
+    const r = normalizePositionChangeRow(raw as Record<string, unknown>);
+    expect(r.comparison_basis).toBe("MARKET_VALUE");
+    expect(r.position_amount).toBe("1234567890123456789.1234567890");
+    expect(r.position_change).toBe("-98765432109876543.9876543210");
+    expect(r.par_amount).toBeNull();
+    expect(r.market_value_amount).toBe("1234567890123456789.1234567890");
+  });
+
+  it("falls back to par_* with basis PAR for a legacy row lacking position_* keys", () => {
+    const legacy = { par_amount: "5000000.0000000000", par_change: "250000.0000000000" };
+    const r = normalizePositionChangeRow(legacy as Record<string, unknown>);
+    expect(r.comparison_basis).toBe("PAR");
+    expect(r.position_amount).toBe("5000000.0000000000");
+    expect(r.position_change).toBe("250000.0000000000");
+    expect(r.market_value_amount).toBeNull();
+    expect(r.market_value_change).toBeNull();
+  });
+
+  it("does not let the legacy fallback override valid new fields", () => {
+    const raw = {
+      comparison_basis: "MARKET_VALUE",
+      position_amount: "42.0000000000",
+      position_change: "1.0000000000",
+      par_amount: "999.0000000000", // stale/ignored when position_* present
+      par_change: "9.0000000000",
+      market_value_amount: "42.0000000000",
+      market_value_change: "1.0000000000",
+    };
+    const r = normalizePositionChangeRow(raw as Record<string, unknown>);
+    expect(r.comparison_basis).toBe("MARKET_VALUE");
+    expect(r.position_amount).toBe("42.0000000000");
+    expect(r.position_change).toBe("1.0000000000");
+  });
+});
+
+describe("fundDisplayLabel", () => {
+  it("maps canonical Allspring tickers to a friendly name + aliases", () => {
+    expect(fundDisplayLabel("AS_CORE_PLUS")).toEqual({
+      label: "Core Plus Bond",
+      aliases: ["STYAX", "WIPIX", "WFIPX"],
+    });
+  });
+  it("returns the ticker unchanged (no aliases) for JP Morgan / unknown funds", () => {
+    expect(fundDisplayLabel("JCPUX")).toEqual({ label: "JCPUX", aliases: [] });
   });
 });

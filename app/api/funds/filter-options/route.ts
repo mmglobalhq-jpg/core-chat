@@ -9,7 +9,8 @@ import { callRpc } from "@/lib/fundsRpc";
 
 export const dynamic = "force-dynamic";
 
-type FilterOptions = { security_types: string[]; sector_types: string[] };
+// `sector_has_null` tells the UI to offer the "Unmapped" (null-sector) filter option.
+type FilterOptions = { security_types: string[]; sector_types: string[]; sector_has_null: boolean };
 
 function opt(v: string | null): string | null {
   if (!v) return null;
