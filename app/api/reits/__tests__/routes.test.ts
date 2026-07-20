@@ -1,0 +1,120 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { NextResponse } from "next/server";
+import { makeFakeReitsClient, SAMPLE, REPORT_IDS } from "@/lib/__tests__/reitFake";
+
+// Mock the auth gate and the server-only REIT client. The real validators, query
+// layer and error mapping still run (only the DB client is faked).
+const requireUser = vi.fn();
+vi.mock("@/lib/reqUser", () => ({ requireUser: (req: Request) => requireUser(req) }));
+
+const holder = vi.hoisted(() => ({ client: null as unknown, fail: false }));
+vi.mock("@/lib/supabaseReits", () => ({
+  getSupabaseReits: () => {
+    if (holder.fail) throw new Error("Missing REITS_SUPABASE_URL / REITS_SUPABASE_SERVICE_ROLE_KEY");
+    return holder.client;
+  },
+}));
+
+import { GET as issuersGET } from "@/app/api/reits/issuers/route";
+import { GET as reportsGET } from "@/app/api/reits/reports/route";
+import { GET as reportDetailGET } from "@/app/api/reits/reports/[reportId]/route";
+
+function req(url: string): Request {
+  return new Request(url, { headers: { authorization: "Bearer test-token" } });
+}
+
+beforeEach(() => {
+  requireUser.mockReset();
+  requireUser.mockResolvedValue({ user: { id: "u1" }, token: "t" });
+  holder.client = makeFakeReitsClient(SAMPLE);
+  holder.fail = false;
+});
+
+describe("GET /api/reits/issuers", () => {
+  it("returns 401 when unauthenticated", async () => {
+    requireUser.mockResolvedValue({
+      error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
+    });
+    const res = await issuersGET(req("https://app/api/reits/issuers"));
+    expect(res.status).toBe(401);
+  });
+
+  it("returns the data-driven issuer list with no-store", async () => {
+    const res = await issuersGET(req("https://app/api/reits/issuers"));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
+    const body = await res.json();
+    expect(body.issuers.map((i: { symbol: string }) => i.symbol)).toContain("ARR");
+  });
+
+  it("returns a sanitized 502 when the service is misconfigured", async () => {
+    holder.fail = true;
+    const res = await issuersGET(req("https://app/api/reits/issuers"));
+    expect(res.status).toBe(502);
+    const body = await res.json();
+    expect(JSON.stringify(body)).not.toMatch(/REITS_SUPABASE|service_role|key/i);
+  });
+});
+
+describe("GET /api/reits/reports", () => {
+  it("returns 401 when unauthenticated", async () => {
+    requireUser.mockResolvedValue({
+      error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
+    });
+    const res = await reportsGET(req("https://app/api/reits/reports?issuer=ARR"));
+    expect(res.status).toBe(401);
+  });
+
+  it("returns 400 for a malformed issuer symbol", async () => {
+    const res = await reportsGET(req("https://app/api/reits/reports?issuer=not%20valid!"));
+    expect(res.status).toBe(400);
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
+  });
+
+  it("returns completed reports newest first", async () => {
+    const res = await reportsGET(req("https://app/api/reits/reports?issuer=ARR"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.reports.map((r: { id: string }) => r.id)).toEqual([
+      REPORT_IDS.A,
+      REPORT_IDS.B,
+      REPORT_IDS.C,
+    ]);
+  });
+});
+
+describe("GET /api/reits/reports/[reportId]", () => {
+  function callDetail(reportId: string) {
+    return reportDetailGET(req(`https://app/api/reits/reports/${reportId}`), {
+      params: Promise.resolve({ reportId }),
+    });
+  }
+
+  it("returns 401 when unauthenticated", async () => {
+    requireUser.mockResolvedValue({
+      error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
+    });
+    const res = await callDetail(REPORT_IDS.A);
+    expect(res.status).toBe(401);
+  });
+
+  it("returns 400 for a non-UUID report id", async () => {
+    const res = await callDetail("not-a-uuid");
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 404 for an unknown / non-current report", async () => {
+    const unknown = await callDetail("00000000-0000-4000-8000-000000000000");
+    expect(unknown.status).toBe(404);
+    const superseded = await callDetail(REPORT_IDS.SUP);
+    expect(superseded.status).toBe(404);
+  });
+
+  it("returns the report body with no-store", async () => {
+    const res = await callDetail(REPORT_IDS.A);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
+    const body = await res.json();
+    expect(body.report.bodyMarkdown).toContain("# Executive summary");
+  });
+});
