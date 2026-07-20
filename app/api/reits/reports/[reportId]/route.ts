@@ -1,9 +1,10 @@
 /**
  * GET /api/reits/reports/[reportId] — one completed current report with its full
- * Markdown body. Authenticated, read-only. The report id is validated as a UUID
- * (400 on malformed input); an unknown or non-current report is 404. The report
- * body is read server-side from the database — no Storage object path or public
- * URL is ever exposed to the browser.
+ * Markdown body. Authenticated, read-only. The report id is validated as a namespaced
+ * `arr:<uuid>` / `orc:<uuid>` id, or a transitional legacy bare ARR UUID (400 on
+ * malformed input); an unknown or non-current report is 404. The report body is read
+ * server-side via the reader RPC — no Storage object path or public URL is ever
+ * exposed to the browser.
  */
 import { requireUser } from "@/lib/reqUser";
 import { getReport, validateReportId } from "@/lib/reitResearch";

@@ -2,10 +2,10 @@
  * Server-ONLY Supabase client for the REIT Research project (the ARR research
  * engine's database).
  *
- * The `/api/reits/*` route handlers use this client exclusively to read the
- * read-only `reit_arr_*` tables. Those tables have forced row-level security with
- * browser roles revoked, so only the service-role key (which bypasses RLS) can
- * read them — hence a dedicated server-only client.
+ * The `/api/reits/*` route handlers use this client exclusively to call the engine's
+ * normalized reader-contract RPCs (reit_research_*_v1). EXECUTE is granted only to the
+ * service role (which bypasses the underlying forced RLS), so only the service-role key
+ * can read reports — hence a dedicated server-only client.
  *
  * NEVER import this from a client component, and never expose REITS_SUPABASE_URL /
  * REITS_SUPABASE_SERVICE_ROLE_KEY to the browser (no NEXT_PUBLIC_ prefix). The
