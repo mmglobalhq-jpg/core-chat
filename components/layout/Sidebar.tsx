@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { BarChart3, BookOpen, LogOut, PanelLeftClose, Plus, X } from "lucide-react";
+import { usePathname, useRouter } from "next/navigation";
+import { BarChart3, BookOpen, Building2, LogOut, PanelLeftClose, Plus, X } from "lucide-react";
 import {
   Sheet,
   SheetContent,
@@ -77,6 +77,7 @@ function SidebarBody({
   const selectConversation = useChatStore((s) => s.selectConversation);
   const hideConversation = useChatStore((s) => s.hideConversation);
   const router = useRouter();
+  const pathname = usePathname();
   const [kbOpen, setKbOpen] = useState(false);
 
   async function handleSignOut() {
@@ -194,6 +195,19 @@ function SidebarBody({
           <Link href="/funds">
             <BarChart3 className="size-4" />
             <span className="text-sm">Funds</span>
+          </Link>
+        </Button>
+        <Button
+          asChild
+          variant="ghost"
+          className={cn(
+            "w-full justify-start gap-2 text-sidebar-foreground",
+            pathname === "/reits" && "bg-sidebar-accent text-sidebar-accent-foreground",
+          )}
+        >
+          <Link href="/reits" aria-current={pathname === "/reits" ? "page" : undefined}>
+            <Building2 className="size-4" />
+            <span className="text-sm">REIT</span>
           </Link>
         </Button>
       </div>
