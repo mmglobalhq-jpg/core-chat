@@ -55,8 +55,9 @@ export class ReitServiceError extends Error {
 
 // Redacted message for unexpected data-service failures — never leak SQL detail.
 const SERVICE_ERR = "REIT research data service error";
-// The reader contract clamps to [1, 100]; ask for the max page.
-const REPORTS_LIMIT = 100;
+// The reader contract clamps to [1, 250] (migration 0006); ask for the max page so the
+// full current ORC history (>100 reports) is listable.
+const REPORTS_LIMIT = 250;
 
 // Reader-contract RPC names (versioned; constants, never derived from input).
 const RPC_LIST_ISSUERS = "reit_research_list_issuers_v1";

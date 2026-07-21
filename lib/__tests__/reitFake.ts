@@ -69,7 +69,7 @@ function listIssuers(recs: Rec[]): Record<string, unknown>[] {
 }
 
 function listReports(recs: Rec[], code: string, limit: number): Record<string, unknown>[] {
-  const lim = Math.max(1, Math.min(Number(limit || 20), 100));
+  const lim = Math.max(1, Math.min(Number(limit || 20), 250)); // reader contract clamp (0006)
   const want = (code || "").toUpperCase();
   return recs
     .filter((r) => r.publishable && r.issuer === want)
