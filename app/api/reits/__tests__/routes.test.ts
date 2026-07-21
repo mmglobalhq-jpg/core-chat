@@ -39,12 +39,14 @@ describe("GET /api/reits/issuers", () => {
     expect(res.status).toBe(401);
   });
 
-  it("returns the data-driven issuer list with no-store", async () => {
+  it("returns the data-driven issuer list (ARR + ORC) with no-store", async () => {
     const res = await issuersGET(req("https://app/api/reits/issuers"));
     expect(res.status).toBe(200);
     expect(res.headers.get("Cache-Control")).toBe("no-store");
     const body = await res.json();
-    expect(body.issuers.map((i: { symbol: string }) => i.symbol)).toContain("ARR");
+    const symbols = body.issuers.map((i: { symbol: string }) => i.symbol);
+    expect(symbols).toContain("ARR");
+    expect(symbols).toContain("ORC");
   });
 
   it("returns a sanitized 502 when the service is misconfigured", async () => {
@@ -71,50 +73,72 @@ describe("GET /api/reits/reports", () => {
     expect(res.headers.get("Cache-Control")).toBe("no-store");
   });
 
-  it("returns completed reports newest first", async () => {
+  it("returns completed ARR reports newest first (namespaced ids)", async () => {
     const res = await reportsGET(req("https://app/api/reits/reports?issuer=ARR"));
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.reports.map((r: { id: string }) => r.id)).toEqual([
-      REPORT_IDS.A,
-      REPORT_IDS.B,
-      REPORT_IDS.C,
+      REPORT_IDS.ARR_A,
+      REPORT_IDS.ARR_B,
     ]);
+  });
+
+  it("returns ORC reports with orc: ids", async () => {
+    const res = await reportsGET(req("https://app/api/reits/reports?issuer=ORC"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.reports.map((r: { id: string }) => r.id)).toEqual([REPORT_IDS.ORC_A]);
   });
 });
 
 describe("GET /api/reits/reports/[reportId]", () => {
   function callDetail(reportId: string) {
-    return reportDetailGET(req(`https://app/api/reits/reports/${reportId}`), {
-      params: Promise.resolve({ reportId }),
-    });
+    return reportDetailGET(
+      req(`https://app/api/reits/reports/${encodeURIComponent(reportId)}`),
+      { params: Promise.resolve({ reportId }) },
+    );
   }
 
   it("returns 401 when unauthenticated", async () => {
     requireUser.mockResolvedValue({
       error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
     });
-    const res = await callDetail(REPORT_IDS.A);
+    const res = await callDetail(REPORT_IDS.ARR_A);
     expect(res.status).toBe(401);
   });
 
-  it("returns 400 for a non-UUID report id", async () => {
+  it("returns 400 for a malformed report id", async () => {
     const res = await callDetail("not-a-uuid");
     expect(res.status).toBe(400);
   });
 
   it("returns 404 for an unknown / non-current report", async () => {
-    const unknown = await callDetail("00000000-0000-4000-8000-000000000000");
+    const unknown = await callDetail("arr:00000000-0000-4000-8000-000000000000");
     expect(unknown.status).toBe(404);
-    const superseded = await callDetail(REPORT_IDS.SUP);
+    const superseded = await callDetail(REPORT_IDS.ARR_SUP);
     expect(superseded.status).toBe(404);
   });
 
-  it("returns the report body with no-store", async () => {
-    const res = await callDetail(REPORT_IDS.A);
+  it("returns the ARR report body with no-store (namespaced id)", async () => {
+    const res = await callDetail(REPORT_IDS.ARR_A);
     expect(res.status).toBe(200);
     expect(res.headers.get("Cache-Control")).toBe("no-store");
     const body = await res.json();
     expect(body.report.bodyMarkdown).toContain("# Executive summary");
+  });
+
+  it("resolves an orc: id to the ORC report body", async () => {
+    const res = await callDetail(REPORT_IDS.ORC_A);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.report.issuerSymbol).toBe("ORC");
+    expect(body.report.bodyMarkdown).toBe("# ORC body");
+  });
+
+  it("resolves a legacy bare UUID to the ARR report", async () => {
+    const res = await callDetail(REPORT_IDS.UUID_A);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.report.issuerSymbol).toBe("ARR");
   });
 });
