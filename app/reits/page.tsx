@@ -82,6 +82,8 @@ function ReitResearchPage() {
   // session kept rendering pre-update data after the backend published new report
   // versions (e.g. an ORC report advancing v2 -> v3). See fix/reits-refresh-stale-ui.
   const [reloadKey, setReloadKey] = useState(0);
+  // Default view shows the latest 12 reports; the archive toggle loads the full history.
+  const [archive, setArchive] = useState(false);
 
   const onSessionExpired = useCallback(() => setSessionExpired(true), []);
   const refreshAll = useCallback(() => setReloadKey((n) => n + 1), []);
@@ -149,16 +151,16 @@ function ReitResearchPage() {
     }
   }, [selectedIssuer, issuerParam, patchUrl]);
 
-  // ---- 2) Load reports for the selected issuer ----
+  // ---- 2) Load reports for the selected issuer (latest 12 by default; archive = all) ----
   useEffect(() => {
     if (!selectedIssuer) return;
     const ac = new AbortController();
     setReports(null);
     setReportsError(null);
-    authedFetch<{ reports: ReportSummary[] }>(
-      `/api/reits/reports?issuer=${encodeURIComponent(selectedIssuer.symbol)}`,
-      ac.signal,
-    )
+    const url =
+      `/api/reits/reports?issuer=${encodeURIComponent(selectedIssuer.symbol)}` +
+      (archive ? "&archive=1" : "");
+    authedFetch<{ reports: ReportSummary[] }>(url, ac.signal)
       .then((r) => setReports(r.reports))
       .catch((e) => {
         if (ac.signal.aborted) return;
@@ -167,7 +169,7 @@ function ReitResearchPage() {
         setReports([]);
       });
     return () => ac.abort();
-  }, [selectedIssuer, reloadKey, onSessionExpired]);
+  }, [selectedIssuer, archive, reloadKey, onSessionExpired]);
 
   // The resolved report: URL value if it exists in the list, else the newest.
   const selectedReportId = useMemo(() => {
@@ -268,6 +270,18 @@ function ReitResearchPage() {
                     ? ` · latest ${fmtDate(selectedIssuer.latestReportDate)}`
                     : ""}
                 </span>
+              )}
+              {selectedIssuer && selectedIssuer.reportCount > 12 && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="ml-auto"
+                  aria-pressed={archive}
+                  onClick={() => setArchive((v) => !v)}
+                >
+                  {archive ? "Show latest 12" : `Show all ${selectedIssuer.reportCount}`}
+                </Button>
               )}
             </div>
           </section>

@@ -1,7 +1,8 @@
 /**
- * GET /api/reits/reports?issuer=ARR — completed current reports for one issuer,
- * newest first (metadata only, no report body). Authenticated, read-only. Invalid
- * issuer symbols are rejected with 400 before any query runs.
+ * GET /api/reits/reports?issuer=ARR[&archive=1] — completed current reports for one issuer,
+ * newest first (metadata only, no report body). Defaults to the latest 12; ``archive=1``
+ * returns the full current history. Authenticated, read-only. Invalid issuer symbols are
+ * rejected with 400 before any query runs.
  */
 import { requireUser } from "@/lib/reqUser";
 import { listReports, validateIssuerSymbol } from "@/lib/reitResearch";
@@ -15,7 +16,8 @@ export async function GET(request: Request) {
   try {
     const sp = new URL(request.url).searchParams;
     const issuer = validateIssuerSymbol(sp.get("issuer"));
-    return reitJson({ issuer, reports: await listReports(issuer) });
+    const archive = sp.get("archive") === "1";
+    return reitJson({ issuer, archive, reports: await listReports(issuer, { archive }) });
   } catch (err) {
     return reitErrorResponse(err);
   }
