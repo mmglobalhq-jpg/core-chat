@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, within } from "@testing-library/react";
+import { render, screen, fireEvent, within, waitFor } from "@testing-library/react";
 
 const push = vi.fn();
 const replace = vi.fn();
@@ -165,5 +165,41 @@ describe("REIT Research page", () => {
     render(<ReitsPage />);
     expect(await screen.findByText(/Couldn't load REITs/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument();
+  });
+
+  // --- Regression: an open session must reflect newly published report versions -------
+
+  it("Refresh re-fetches and shows a newly published report version (v2 -> v3)", async () => {
+    let orcVersion = 2;
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("/api/reits/issuers")) return ok(ISSUERS);
+      if (url.match(/\/api\/reits\/reports\/[^?]+$/)) return ok(DETAILS[ORC_A]);
+      if (url.includes("issuer=ORC")) {
+        return ok({ reports: [{ ...ORC_REPORTS.reports[0], version: orcVersion }] });
+      }
+      if (url.includes("/api/reits/reports")) return ok(ARR_REPORTS);
+      return ok({});
+    });
+    currentParams = new URLSearchParams({ issuer: "ORC" });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ReitsPage />);
+
+    // Initial open session shows the pre-convergence version badge.
+    expect(await screen.findByText(/·\s*v2/)).toBeInTheDocument();
+
+    // Backend publishes the canonical v3; the user hits Refresh.
+    orcVersion = 3;
+    fireEvent.click(screen.getByRole("button", { name: /refresh reports/i }));
+    expect(await screen.findByText(/·\s*v3/)).toBeInTheDocument();
+  });
+
+  it("re-fetches when the tab regains focus (long-open session stays current)", async () => {
+    const fetchMock = mockFetch();
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ReitsPage />);
+    await screen.findByText("ARR May report");
+    const callsAfterLoad = fetchMock.mock.calls.length;
+    fireEvent(window, new Event("focus"));
+    await waitFor(() => expect(fetchMock.mock.calls.length).toBeGreaterThan(callsAfterLoad));
   });
 });

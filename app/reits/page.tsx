@@ -76,10 +76,30 @@ function ReitResearchPage() {
   const [detailError, setDetailError] = useState<string | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [sessionExpired, setSessionExpired] = useState(false);
-  // Bump to force a re-fetch of the issuer list (retry control).
-  const [issuersReload, setIssuersReload] = useState(0);
+  // Bump to force a re-fetch of the whole view (issuers + reports + detail). Drives the
+  // manual Refresh control, the issuer-list error retry, and the tab-focus/visibility
+  // auto-refresh below. Without this, the page fetched only once on mount and an open
+  // session kept rendering pre-update data after the backend published new report
+  // versions (e.g. an ORC report advancing v2 -> v3). See fix/reits-refresh-stale-ui.
+  const [reloadKey, setReloadKey] = useState(0);
 
   const onSessionExpired = useCallback(() => setSessionExpired(true), []);
+  const refreshAll = useCallback(() => setReloadKey((n) => n + 1), []);
+
+  // Re-fetch when the user returns to a backgrounded tab (or refocuses the window), so a
+  // long-open session reflects newly published report versions without a manual reload.
+  useEffect(() => {
+    if (sessionExpired) return;
+    const onVisible = () => {
+      if (document.visibilityState === "visible") refreshAll();
+    };
+    window.addEventListener("focus", refreshAll);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("focus", refreshAll);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [refreshAll, sessionExpired]);
 
   // Merge a patch into the URL query (drives all selection state).
   const patchUrl = useCallback(
@@ -111,7 +131,7 @@ function ReitResearchPage() {
         setIssuers([]);
       });
     return () => ac.abort();
-  }, [issuersReload, onSessionExpired]);
+  }, [reloadKey, onSessionExpired]);
 
   // The resolved issuer: URL value if it exists, else ARR, else the first issuer.
   const selectedIssuer = useMemo(() => {
@@ -147,7 +167,7 @@ function ReitResearchPage() {
         setReports([]);
       });
     return () => ac.abort();
-  }, [selectedIssuer, onSessionExpired]);
+  }, [selectedIssuer, reloadKey, onSessionExpired]);
 
   // The resolved report: URL value if it exists in the list, else the newest.
   const selectedReportId = useMemo(() => {
@@ -188,7 +208,7 @@ function ReitResearchPage() {
         setDetailError(e instanceof Error ? e.message : "Failed to load report");
       });
     return () => ac.abort();
-  }, [selectedReportId, onSessionExpired]);
+  }, [selectedReportId, reloadKey, onSessionExpired]);
 
   // ---- Render ----
   return (
@@ -201,6 +221,18 @@ function ReitResearchPage() {
         </Button>
         <h1 className="text-base font-medium">REIT Research</h1>
         <div className="ml-auto flex items-center gap-2">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="size-9"
+            aria-label="Refresh reports"
+            title="Refresh reports"
+            disabled={sessionExpired}
+            onClick={refreshAll}
+          >
+            <RefreshCw className="size-5" />
+          </Button>
           <ThemeToggle />
         </div>
       </header>
@@ -249,7 +281,7 @@ function ReitResearchPage() {
                 reports={reports}
                 reportsError={reportsError}
                 selectedReportId={selectedReportId}
-                onRetryIssuers={() => setIssuersReload((n) => n + 1)}
+                onRetryIssuers={refreshAll}
                 onSelect={(id) =>
                   patchUrl({ issuer: selectedIssuer?.symbol ?? DEFAULT_ISSUER, report: id }, "push")
                 }
