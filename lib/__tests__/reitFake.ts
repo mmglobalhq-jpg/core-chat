@@ -160,3 +160,39 @@ export const SAMPLE: Rec[] = [
 
 // ARR-only variant: ORC has no publishable reports, so it must be absent from the list.
 export const SAMPLE_NO_ORC: Rec[] = SAMPLE.filter((r) => r.issuer !== "ORC");
+
+// --- Post-determinism-convergence scenario (regression for the stale-UI incident) ------
+// After the backend converged every ORC report from v2 to canonical v3, the reader
+// contract must resolve the CURRENT version (v3) — never a superseded v1/v2 — and ARR
+// (untouched) must stay at v1. These ids/records model that verified production state.
+const UUID_ORC_JUN = "66666666-6666-4666-8666-666666666666";
+const UUID_ORC_MAY = "77777777-7777-4777-8777-777777777777";
+const UUID_ORC_JUN_V2 = "88888888-8888-4888-8888-888888888888";
+const UUID_ORC_JUN_V1 = "99999999-9999-4999-8999-999999999999";
+const UUID_ARR_MAY = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+
+export const CONVERGED_IDS = {
+  ORC_JUN_V3: `orc:${UUID_ORC_JUN}`, // current ORC 2026-06-30, version 3
+  ORC_MAY_V3: `orc:${UUID_ORC_MAY}`, // current ORC 2026-05-31, version 3
+  ORC_JUN_V2: `orc:${UUID_ORC_JUN_V2}`, // superseded — must never be presented
+  ORC_JUN_V1: `orc:${UUID_ORC_JUN_V1}`, // superseded — must never be presented
+  ARR_MAY_V1: `arr:${UUID_ARR_MAY}`, // current ARR 2026-05-31, version 1
+};
+
+// The current (publishable) rows are what the reader contract exposes; the superseded
+// v2/v1 rows are non-publishable (the DB never points current_version_id at them).
+export const SAMPLE_CONVERGED: Rec[] = [
+  { issuer: "ORC", uuid: UUID_ORC_JUN, portfolioDate: "2026-06-30", publicationDate: "2026-07-10",
+    title: "ORCHID ISLAND CAPITAL ANNOUNCES ESTIMATED SECOND QUARTER 2026 RESULTS", version: 3,
+    markdown: "# ORC June 2026 — v3 canonical body", publishable: true },
+  { issuer: "ORC", uuid: UUID_ORC_MAY, portfolioDate: "2026-05-31", publicationDate: "2026-06-11",
+    title: "ORCHID ISLAND CAPITAL ANNOUNCES JUNE 2026 CHARACTERISTICS", version: 3,
+    markdown: "# ORC May 2026 — v3 canonical body", publishable: true },
+  { issuer: "ORC", uuid: UUID_ORC_JUN_V2, portfolioDate: "2026-06-30", publicationDate: "2026-07-10",
+    title: "SUPERSEDED v2", version: 2, markdown: "# stale v2 body", publishable: false },
+  { issuer: "ORC", uuid: UUID_ORC_JUN_V1, portfolioDate: "2026-06-30", publicationDate: "2026-07-10",
+    title: "SUPERSEDED v1", version: 1, markdown: "# stale v1 body", publishable: false },
+  { issuer: "ARR", uuid: UUID_ARR_MAY, portfolioDate: "2026-05-31", publicationDate: "2026-06-12",
+    title: "ARR adds $466mm to portfolio in May", version: 1,
+    markdown: "# ARR May 2026 body", publishable: true },
+];
