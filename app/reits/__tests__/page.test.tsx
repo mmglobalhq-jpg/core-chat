@@ -202,4 +202,45 @@ describe("REIT Research page", () => {
     fireEvent(window, new Event("focus"));
     await waitFor(() => expect(fetchMock.mock.calls.length).toBeGreaterThan(callsAfterLoad));
   });
+
+  // --- Regression: latest-12 default + archive view for older reports ----------------
+
+  it("defaults to the latest 12 and exposes an archive toggle when >12 reports exist", async () => {
+    const issuers = {
+      issuers: [
+        { symbol: "ORC", name: "Orchid Island Capital, Inc.", reportCount: 15, latestReportDate: "2026-06-30" },
+      ],
+    };
+    const mk = (n: number) => ({
+      reports: Array.from({ length: n }, (_, i) => ({
+        id: `orc:${String(i).padStart(8, "0")}-0000-4000-8000-000000000000`,
+        issuerSymbol: "ORC",
+        issuerName: "Orchid Island Capital, Inc.",
+        title: `ORC report ${n - i}`,
+        portfolioDate: `2026-${String(((n - i) % 12) + 1).padStart(2, "0")}-28`,
+        publicationDate: null,
+        version: 3,
+      })),
+    });
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("/api/reits/issuers")) return ok(issuers);
+      if (url.match(/\/api\/reits\/reports\/[^?]+$/)) return ok({ report: { bodyMarkdown: "# body" } });
+      if (url.includes("archive=1")) return ok(mk(15));
+      if (url.includes("/api/reits/reports")) return ok(mk(12));
+      return ok({});
+    });
+    currentParams = new URLSearchParams({ issuer: "ORC" });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ReitsPage />);
+
+    // Default: an archive toggle is offered (issuer has 15 > 12 reports).
+    const toggle = await screen.findByRole("button", { name: /show all 15/i });
+    // Clicking the toggle refetches with archive=1.
+    fireEvent.click(toggle);
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some((c) => String(c[0]).includes("archive=1"))).toBe(true),
+    );
+    // And offers to collapse back to the latest 12.
+    expect(await screen.findByRole("button", { name: /show latest 12/i })).toBeInTheDocument();
+  });
 });

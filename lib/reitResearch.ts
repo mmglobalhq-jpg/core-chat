@@ -55,9 +55,11 @@ export class ReitServiceError extends Error {
 
 // Redacted message for unexpected data-service failures — never leak SQL detail.
 const SERVICE_ERR = "REIT research data service error";
-// The reader contract clamps to [1, 250] (migration 0006); ask for the max page so the
-// full current ORC history (>100 reports) is listable.
-const REPORTS_LIMIT = 250;
+// Default view: the latest 12 monthly reports per issuer (newest first). The reader
+// contract clamps to [1, 250] (migration 0006); the archive view asks for the full
+// current history so older reports remain reachable on demand.
+const DEFAULT_REPORTS_LIMIT = 12;
+const ARCHIVE_REPORTS_LIMIT = 250;
 
 // Reader-contract RPC names (versioned; constants, never derived from input).
 const RPC_LIST_ISSUERS = "reit_research_list_issuers_v1";
@@ -179,11 +181,18 @@ export async function listIssuers(): Promise<ReitIssuer[]> {
     .sort((a, b) => a.symbol.localeCompare(b.symbol));
 }
 
-/** Completed current reports for one issuer, newest first (server-ordered). */
-export async function listReports(issuerSymbol: string): Promise<ReitReportSummary[]> {
+/**
+ * Completed current reports for one issuer, newest first (server-ordered). Defaults to the
+ * latest 12; ``archive`` requests the full current history. Superseded/non-current versions
+ * are excluded by the reader contract, never here.
+ */
+export async function listReports(
+  issuerSymbol: string,
+  opts: { archive?: boolean } = {},
+): Promise<ReitReportSummary[]> {
   const rows = await rpc<SummaryRow>(RPC_LIST_REPORTS, {
     p_issuer_code: issuerSymbol,
-    p_limit: REPORTS_LIMIT,
+    p_limit: opts.archive ? ARCHIVE_REPORTS_LIMIT : DEFAULT_REPORTS_LIMIT,
   });
   return rows.map(toSummary);
 }

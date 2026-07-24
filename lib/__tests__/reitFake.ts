@@ -106,6 +106,28 @@ function getReport(recs: Rec[], pid: string): Record<string, unknown>[] {
   return rec ? [{ ...summaryRow(rec), markdown: rec.markdown }] : [];
 }
 
+/** Build `n` distinct monthly ORC reports (newest last), all publishable/current v3. */
+export function manyOrcReports(n: number): Rec[] {
+  const recs: Rec[] = [];
+  for (let i = 0; i < n; i++) {
+    const monthIndex = i; // months back-to-front; distinct year-month per report
+    const y = 2024 + Math.floor(monthIndex / 12);
+    const mo = String((monthIndex % 12) + 1).padStart(2, "0");
+    const hex = String(i + 1).padStart(2, "0");
+    recs.push({
+      issuer: "ORC",
+      uuid: `cccccccc-cccc-4ccc-8ccc-0000000000${hex}`,
+      portfolioDate: `${y}-${mo}-28`,
+      publicationDate: `${y}-${mo}-28`,
+      title: `ORC ${y}-${mo}`,
+      version: 3,
+      markdown: `# ORC ${y}-${mo}`,
+      publishable: true,
+    });
+  }
+  return recs;
+}
+
 export function makeFakeReitsClient(recs: Rec[]): {
   rpc: (fn: string, args: Record<string, unknown>) => Promise<{ data: unknown; error: null }>;
 } {
