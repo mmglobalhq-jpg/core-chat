@@ -89,6 +89,21 @@ describe("runQueryData", () => {
     expect(sent.constraints.max_rows).toBe(500); // clamped
   });
 
+  it("sends the Stage 5A canary body the gateway accepts", async () => {
+    // The gateway's QueryRequest is extra="forbid" and REQUIRES `question`;
+    // there is no `operation` field. Pins the exact shape validated live.
+    gatewayReturns({ outcome: "answer", correlation_id: "corr-1" });
+    await runQueryData({ mode: "funds", question: "what funds are tracked?" }, CTX);
+    const sent = postQuery.mock.calls[0][0] as Record<string, unknown>;
+    expect(sent.mode).toBe("funds");
+    expect(sent.question).toBe("what funds are tracked?");
+    expect(sent).not.toHaveProperty("operation");
+    // Only keys the gateway schema accepts.
+    expect(Object.keys(sent).sort()).toEqual(
+      ["constraints", "context", "mode", "question", "scope"].sort(),
+    );
+  });
+
   it("isolates gateway failure into a safe error result (never throws)", async () => {
     postQuery.mockRejectedValue(new Error("boom"));
     const r = await runQueryData({ mode: "funds", question: "what funds?" }, CTX);
