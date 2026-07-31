@@ -102,6 +102,28 @@ reports — hence a dedicated server-only client. No Storage bucket variable is 
 the report body (Markdown) is returned by the RPC. This may be the same Supabase project
 as Core Chat; the client stays dedicated and isolated regardless. See `.env.local.example`.
 
+### Key format and auth headers (`sb_secret_*` compatible)
+
+`REITS_SUPABASE_SERVICE_ROLE_KEY` accepts **either** a legacy JWT service-role key **or** a
+current `sb_secret_*` key. `sb_secret_*` keys are **opaque, not JWTs**. `lib/supabaseReits.ts`
+never decodes, splits, or validates the value — it passes it straight to
+`createClient(url, key)`, the documented server-side migration pattern, so a new secret key
+is drop-in for this path.
+
+That SDK sends **both** `apikey` and `Authorization: Bearer <key>`. This is expected and
+supported for the SDK path, and is pinned by
+`lib/__tests__/supabaseReits.headers.test.ts` (mocked fetch, synthetic key, no network). If
+an SDK upgrade changes those headers that test fails — do **not** simply update the
+expectation; re-run the live REITS canaries first.
+
+Contrast with core-heartbeat's `tools/reit_research.py`, which builds the request by hand
+and therefore sends **`apikey` only** — duplicating an opaque key into `Authorization` on a
+raw request can be rejected as an invalid JWT. Because the two paths send different
+headers, **each needs its own live verification** during rotation: a passing `apikey`-only
+probe does not prove this SDK path works. Full rotation procedure, probe, stop conditions,
+and rollback: `core-heartbeat/docs/reit-research-tools.md` → *Rotating to an `sb_secret_*`
+key*. Verify this path by loading `/reits` and opening a report.
+
 ## Local development
 
 1. Copy `.env.local.example` → `.env.local` and fill `REITS_SUPABASE_URL` /
