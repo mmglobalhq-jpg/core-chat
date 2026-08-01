@@ -1,35 +1,48 @@
 // @vitest-environment node
 /**
- * Pins the REQUEST HEADERS the installed @supabase/supabase-js actually sends for a
- * REITS reader-contract RPC, using a mocked fetch. No network, no real key.
+ * Pins the REQUEST HEADERS the REITS Supabase client sends, for BOTH Supabase
+ * server-key generations. Mocked fetch only — no network, no real key.
  *
- * Why this exists: Supabase secret keys (`sb_secret_*`) are OPAQUE, not JWTs. A
- * hand-rolled request must send them in `apikey` only — duplicating one into
- * `Authorization: Bearer` can be rejected as an invalid JWT (that is why
- * core-heartbeat's raw httpx client sends `apikey` alone).
+ * The two generations need different auth headers:
+ *  - legacy JWT service-role key — PostgREST resolves the role from the Bearer JWT.
+ *    With `apikey` alone the request is admitted but runs as `anon`, which holds no
+ *    EXECUTE grant on the reader RPCs (verified in production: 401 "permission
+ *    denied for function"). BOTH headers are required.
+ *  - `sb_secret_*` — opaque, not a JWT. `apikey` alone resolves the role, and
+ *    duplicating it into Authorization risks rejection as an invalid JWT.
  *
- * The SDK path is different: `createClient(url, sb_secret_*)` is the documented
- * server-side migration pattern, and this SDK version sends BOTH `apikey` and
- * `Authorization: Bearer <key>`. We do not suppress that — there is no supported
- * mechanism to, and Supabase supports the pattern. We pin it instead, so an SDK
- * upgrade that changes the header contract fails here and forces a live re-validation
- * against the project before it reaches production.
+ * supabase-js 2.110.0 sends both headers for every key shape, so `lib/supabaseReits`
+ * installs a scoped `global.fetch` wrapper that strips Authorization for secret keys
+ * only. Handling both is what removes the flag day.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
-// Synthetic, opaque, and shaped like a secret key. NEVER a real credential.
-const SYNTHETIC_KEY = "sb_secret_synthetic_test_value";
+// Synthetic + opaque, shaped like a secret key. NEVER a real credential.
+const SECRET_KEY = "sb_secret_synthetic_test_value";
+// JWT-SHAPED but synthetic: header {"alg":"HS256"}, payload {"r":"svc"}, literal
+// signature. Never a real token — only its three-part shape matters here.
+const LEGACY_KEY = "eyJhbGciOiJIUzI1NiJ9.eyJyIjoic3ZjIn0.sig";
 const SYNTHETIC_URL = "https://synthetic.invalid";
 
-type Captured = { headers: Record<string, string>; url: string; method?: string };
+type Captured = {
+  headers: Record<string, string>;
+  url: string;
+  method?: string;
+  body?: string;
+};
 
-async function captureRpcRequest(key = SYNTHETIC_KEY): Promise<Captured> {
+async function captureRpc(
+  key: string,
+  fn = "reit_research_list_issuers_v1",
+  args: Record<string, unknown> = {},
+): Promise<Captured> {
   let captured: Captured | null = null;
 
   const mockFetch = vi.fn(async (url: unknown, init: Record<string, unknown> = {}) => {
     captured = {
       url: String(url),
       method: init.method as string | undefined,
+      body: typeof init.body === "string" ? init.body : undefined,
       headers: Object.fromEntries(new Headers((init.headers ?? {}) as HeadersInit).entries()),
     };
     return new Response("[]", { status: 200, headers: { "Content-Type": "application/json" } });
@@ -39,7 +52,7 @@ async function captureRpcRequest(key = SYNTHETIC_KEY): Promise<Captured> {
   vi.resetModules(); // the module memoizes its client; force a fresh one per case
   process.env.REITS_SUPABASE_SERVICE_ROLE_KEY = key;
   const { getSupabaseReits } = await import("@/lib/supabaseReits");
-  await getSupabaseReits().rpc("reit_research_list_issuers_v1", {});
+  await getSupabaseReits().rpc(fn, args);
 
   if (!captured) throw new Error("no request captured");
   return captured;
@@ -53,7 +66,6 @@ describe("supabaseReits request headers (mocked fetch)", () => {
     savedUrl = process.env.REITS_SUPABASE_URL;
     savedKey = process.env.REITS_SUPABASE_SERVICE_ROLE_KEY;
     process.env.REITS_SUPABASE_URL = SYNTHETIC_URL;
-    process.env.REITS_SUPABASE_SERVICE_ROLE_KEY = SYNTHETIC_KEY;
   });
 
   afterEach(() => {
@@ -65,36 +77,97 @@ describe("supabaseReits request headers (mocked fetch)", () => {
     vi.resetModules();
   });
 
-  it("sends the configured key in the apikey header", async () => {
-    const { headers } = await captureRpcRequest();
-    expect(headers["apikey"]).toBe(SYNTHETIC_KEY);
+  // --- legacy JWT key: BOTH headers ---------------------------------------
+  it("legacy key sends apikey AND Authorization", async () => {
+    // Regression guard: stripping Authorization here breaks production with 401
+    // "permission denied for function".
+    const { headers } = await captureRpc(LEGACY_KEY);
+    expect(headers["apikey"]).toBe(LEGACY_KEY);
+    expect(headers["authorization"]).toBe(`Bearer ${LEGACY_KEY}`);
   });
 
-  it("passes an opaque sb_secret_* value through unparsed", async () => {
-    // No decoding, splitting, or JWT validation may happen to the key.
-    const { headers } = await captureRpcRequest();
-    expect(headers["apikey"]).toBe(SYNTHETIC_KEY);
-    expect(headers["apikey"]).not.toContain(".");
+  // --- sb_secret_* key: apikey only ----------------------------------------
+  it("secret key sends apikey and NO Authorization", async () => {
+    const { headers } = await captureRpc(SECRET_KEY);
+    expect(headers["apikey"]).toBe(SECRET_KEY);
+    expect(headers["authorization"]).toBeUndefined();
   });
 
-  it("targets the reader-contract RPC path", async () => {
-    const { url } = await captureRpcRequest();
-    expect(url).toBe(`${SYNTHETIC_URL}/rest/v1/rpc/reit_research_list_issuers_v1`);
+  it("only the Authorization header is removed for a secret key", async () => {
+    const legacy = await captureRpc(LEGACY_KEY);
+    const secret = await captureRpc(SECRET_KEY);
+    const removed = Object.keys(legacy.headers).filter((h) => !(h in secret.headers));
+    expect(removed).toEqual(["authorization"]);
   });
 
-  it("PINS the SDK Authorization behavior — change here means re-validate live", async () => {
-    // Current @supabase/supabase-js mirrors the key into Authorization: Bearer.
-    // This is the documented createClient(url, sb_secret_*) migration pattern, so we
-    // record it rather than fight it. If an upgrade flips this, do NOT just update
-    // the expectation: re-run the live REITS canaries first.
-    const { headers } = await captureRpcRequest();
-    expect(headers["authorization"]).toBe(`Bearer ${SYNTHETIC_KEY}`);
+  it("preserves the SDK's other headers for a secret key", async () => {
+    const { headers } = await captureRpc(SECRET_KEY);
+    // content-profile selects the schema; x-client-info is the SDK's own tag.
+    expect(headers["content-profile"]).toBeDefined();
+    expect(headers["x-client-info"]).toBeDefined();
+    expect(headers["content-type"]).toContain("application/json");
   });
 
-  it("does not special-case key shape (opaque and JWT-shaped behave identically)", async () => {
-    const opaque = await captureRpcRequest(SYNTHETIC_KEY);
-    const jwtShaped = await captureRpcRequest("eyJhbGciOiJIUzI1NiJ9.eyJyIjoic3ZjIn0.sig");
-    expect(Object.keys(opaque.headers).sort()).toEqual(Object.keys(jwtShaped.headers).sort());
+  // --- request contract unchanged by the wrapper ---------------------------
+  it("keeps the RPC path and body identical across both key generations", async () => {
+    const args = { p_issuer_code: "ARR", p_limit: 5 };
+    const legacy = await captureRpc(LEGACY_KEY, "reit_research_list_reports_v1", args);
+    const secret = await captureRpc(SECRET_KEY, "reit_research_list_reports_v1", args);
+    expect(secret.url).toBe(`${SYNTHETIC_URL}/rest/v1/rpc/reit_research_list_reports_v1`);
+    expect(secret.url).toBe(legacy.url);
+    expect(secret.method).toBe(legacy.method);
+    expect(secret.body).toBe(legacy.body);
+    expect(JSON.parse(secret.body ?? "{}")).toEqual(args);
+  });
+
+  it.each([
+    "reit_research_list_issuers_v1",
+    "reit_research_list_reports_v1",
+    "reit_research_get_report_v1",
+  ])("preserves the contract for %s", async (fn) => {
+    const secret = await captureRpc(SECRET_KEY, fn);
+    expect(secret.url).toBe(`${SYNTHETIC_URL}/rest/v1/rpc/${fn}`);
+    expect(secret.headers["apikey"]).toBe(SECRET_KEY);
+    expect(secret.headers["authorization"]).toBeUndefined();
+  });
+
+  // --- key handling --------------------------------------------------------
+  it("passes both key shapes through unparsed", async () => {
+    // Never decoded, split, or validated — each must reach the wire byte-for-byte.
+    expect((await captureRpc(SECRET_KEY)).headers["apikey"]).toBe(SECRET_KEY);
+    expect((await captureRpc(LEGACY_KEY)).headers["apikey"]).toBe(LEGACY_KEY);
+  });
+
+  it.each([
+    "some-opaque-non-prefixed-value",
+    "sb_publishable_not_secret",
+    "SB_SECRET_UPPERCASE", // prefix match is case-sensitive
+  ])("treats unknown format %s as legacy (safe default)", async (key) => {
+    const { headers } = await captureRpc(key);
+    expect(headers["apikey"]).toBe(key);
+    expect(headers["authorization"]).toBe(`Bearer ${key}`);
+  });
+
+  it("never includes the key in a thrown error", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("network down");
+      }),
+    );
+    vi.resetModules();
+    process.env.REITS_SUPABASE_SERVICE_ROLE_KEY = SECRET_KEY;
+    const { getSupabaseReits } = await import("@/lib/supabaseReits");
+    let res: string;
+    try {
+      // supabase-js surfaces transport failures in the result's `error` field
+      // rather than throwing; check both shapes.
+      res = JSON.stringify(await getSupabaseReits().rpc("reit_research_list_issuers_v1", {}));
+    } catch (e: unknown) {
+      res = String(e);
+    }
+    expect(res).not.toContain(SECRET_KEY);
+    expect(res).toMatch(/network down|error/i); // the failure did surface
   });
 
   it("never reads a real env file — credentials come from process.env only", async () => {

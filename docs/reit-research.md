@@ -102,27 +102,48 @@ reports — hence a dedicated server-only client. No Storage bucket variable is 
 the report body (Markdown) is returned by the RPC. This may be the same Supabase project
 as Core Chat; the client stays dedicated and isolated regardless. See `.env.local.example`.
 
-### Key format and auth headers (`sb_secret_*` compatible)
+### Key format and auth headers (dual-generation support)
 
 `REITS_SUPABASE_SERVICE_ROLE_KEY` accepts **either** a legacy JWT service-role key **or** a
-current `sb_secret_*` key. `sb_secret_*` keys are **opaque, not JWTs**. `lib/supabaseReits.ts`
-never decodes, splits, or validates the value — it passes it straight to
-`createClient(url, key)`, the documented server-side migration pattern, so a new secret key
-is drop-in for this path.
+current `sb_secret_*` key. **The two generations need different auth headers:**
 
-That SDK sends **both** `apikey` and `Authorization: Bearer <key>`. This is expected and
-supported for the SDK path, and is pinned by
-`lib/__tests__/supabaseReits.headers.test.ts` (mocked fetch, synthetic key, no network). If
-an SDK upgrade changes those headers that test fails — do **not** simply update the
-expectation; re-run the live REITS canaries first.
+| Key format | `apikey` | `Authorization: Bearer` |
+| --- | --- | --- |
+| legacy JWT service-role key | ✅ required | ✅ **required** |
+| `sb_secret_*` (opaque) | ✅ required | ❌ must be omitted |
 
-Contrast with core-heartbeat's `tools/reit_research.py`, which builds the request by hand
-and therefore sends **`apikey` only** — duplicating an opaque key into `Authorization` on a
-raw request can be rejected as an invalid JWT. Because the two paths send different
-headers, **each needs its own live verification** during rotation: a passing `apikey`-only
-probe does not prove this SDK path works. Full rotation procedure, probe, stop conditions,
-and rollback: `core-heartbeat/docs/reit-research-tools.md` → *Rotating to an `sb_secret_*`
-key*. Verify this path by loading `/reits` and opening a report.
+**Legacy keys need both.** PostgREST resolves the role from the Bearer JWT; with `apikey`
+alone the request is admitted but runs as `anon`, which holds no `EXECUTE` grant on the
+reader RPCs — verified in production as `401 permission denied for function`.
+
+**`sb_secret_*` keys are opaque, not JWTs**, so putting one in `Authorization` risks
+rejection as an invalid JWT.
+
+supabase-js (2.110.0) sends **both** headers for every key shape and does not detect the
+new format. `lib/supabaseReits.ts` therefore installs a **scoped `global.fetch` wrapper**,
+using the SDK's documented hook, that removes **only** the `Authorization` header — and
+only when the configured key starts with `sb_secret_`. Legacy keys get the SDK's default
+headers untouched. Global `fetch` is never mutated; the wrapper is attached to this client
+alone, and `apikey`, `content-profile`, `x-client-info`, the request body, method, and all
+timeout/error behavior pass through unchanged. The key is never decoded, logged, or
+serialized.
+
+Because both generations are handled by the same deployed code, **this can ship before the
+key is rotated — there is no flag day.**
+
+`lib/__tests__/supabaseReits.headers.test.ts` pins all of it (mocked fetch, synthetic keys,
+no network): legacy → both headers; `sb_secret_*` → `apikey` only; exactly one header
+removed; other SDK headers preserved; path/body identical across generations; unknown
+formats fall back to legacy-safe behavior. If an SDK upgrade changes these headers that
+test fails — do **not** simply update the expectation; re-run the live REITS canaries
+first.
+
+core-heartbeat's `tools/reit_research.py` reaches the same behavior by building headers
+directly. Because the two paths construct requests differently, **each needs its own live
+verification** during rotation: a passing backend probe does not prove this SDK path
+works. Full rotation procedure, probe, stop conditions, and rollback:
+`core-heartbeat/docs/reit-research-tools.md` → *Rotating to an `sb_secret_*` key*. Verify
+this path by loading `/reits` and opening a report.
 
 ## Local development
 
