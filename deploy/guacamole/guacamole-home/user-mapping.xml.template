@@ -4,8 +4,9 @@
   user-mapping.xml (gitignored). Do NOT put real secrets here.
 
   Values are injected from the master .env:
-    ${GUAC_ADMIN_PASSWORD}  Guacamole UI login password (2nd factor behind Access)
-    ${RDP_HOST} ${RDP_PORT} ${RDP_USERNAME} ${RDP_PASSWORD}  the target desktop
+    GUAC_ADMIN_PASSWORD  Guacamole UI login password — the ONLY web access control
+                         (no Cloudflare Access; see deploy/guacamole/README.md)
+    RDP_HOST RDP_PORT RDP_USERNAME RDP_PASSWORD  the target desktop
 -->
 <user-mapping>
     <authorize username="admin" password="${GUAC_ADMIN_PASSWORD}">

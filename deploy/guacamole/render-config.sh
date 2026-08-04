@@ -17,5 +17,5 @@ here="$(cd "$(dirname "$0")" && pwd)"
 export RDP_HOST RDP_USERNAME RDP_PASSWORD GUAC_ADMIN_PASSWORD RDP_PORT="${RDP_PORT:-3389}"
 
 envsubst < "$here/guacamole-home/user-mapping.xml.template" > "$here/guacamole-home/user-mapping.xml"
-chmod 600 "$here/guacamole-home/user-mapping.xml"
-echo "rendered guacamole-home/user-mapping.xml (gitignored, mode 600)"
+chmod 640 "$here/guacamole-home/user-mapping.xml"   # 0640 + compose group_add "1000"; 600 makes it unreadable to the container (uid 1001)
+echo "rendered guacamole-home/user-mapping.xml (gitignored, mode 640)"

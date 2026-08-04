@@ -37,6 +37,15 @@ services:
       # Deploy the webapp as ROOT.war so it serves at / instead of /guacamole/.
       # desktop.mmglobal.us hits the bare domain; without this Tomcat 404s at root.
       WEBAPP_CONTEXT: ROOT
+    # user-mapping.xml holds cleartext credentials and is mode 0640 owned
+    # mmglobal:mmglobal. The image runs as uid 1001 (guacamole), which could only
+    # read it when the file was world-readable (0644) - the exposure flagged as
+    # R-01/C-11 in the security audit. Granting the mmglobal gid as a supplementary
+    # group lets the container read it WITHOUT world-readable and WITHOUT running as
+    # root. Mirrors the dig gateway's group_add: ["10001"] pattern.
+    # Do NOT "fix" a permission error here by chmod 644 or by chowning the file.
+    group_add:
+      - "1000"
     volumes:
       # Rendered config: user-mapping.xml (secrets, gitignored) + guacamole.properties.
       - ./guacamole-home:/etc/guacamole:ro
