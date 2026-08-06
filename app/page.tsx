@@ -192,6 +192,7 @@ export default function Home() {
         controller.signal,
         priorHistory,
         docIds,
+        conversationId,
       )
         .then((result) => {
           finalize(

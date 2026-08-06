@@ -36,6 +36,7 @@ export async function POST(request: Request) {
   let history;
   let documentIds: string[] = [];
   let timezone: string | null = null;
+  let chatId: string | null = null;
   try {
     const body = await request.json();
     text = typeof body?.text === "string" ? body.text : "";
@@ -45,6 +46,7 @@ export async function POST(request: Request) {
       ? body.document_ids.filter((d: unknown) => typeof d === "string").slice(0, 10)
       : [];
     timezone = typeof body?.timezone === "string" ? body.timezone : null;
+    chatId = typeof body?.chat_id === "string" ? body.chat_id : null;
   } catch {
     return NextResponse.json({ error: "invalid request body" }, { status: 400 });
   }
@@ -61,6 +63,7 @@ export async function POST(request: Request) {
     timezone,
     history,
     document_ids: documentIds,
+    chat_id: chatId,
   };
 
   let res: Response;

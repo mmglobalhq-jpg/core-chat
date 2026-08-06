@@ -61,6 +61,7 @@ export async function sendChat(
   signal?: AbortSignal,
   history?: { role: string; content: string }[],
   docIds?: string[],
+  chatId?: string,
 ): Promise<ChatResult> {
   const res = await fetch("/api/intent", {
     method: "POST",
@@ -71,6 +72,11 @@ export async function sendChat(
     body: JSON.stringify({
       text, model, history, document_ids: docIds,
       timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      // Which conversation this turn belongs to. The backend keys a pending
+      // write-confirmation ("add these 12 games?" -> "yes") by chat, so without
+      // it two open chats share one slot and a "yes" in one can release the
+      // other's calendar writes.
+      chat_id: chatId,
     }),
     signal,
   });
