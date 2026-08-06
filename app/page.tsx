@@ -198,9 +198,16 @@ export default function Home() {
           finalize(
             streamed ||
               result.reply ||
+              // Last-resort text when nothing streamed and there is no reply body.
+              // The backend now composes from partial results on a step-bound halt,
+              // so this should be rare — but it is what the user reads when it
+              // happens, and "halted_step_bound" is an internal state name, not an
+              // explanation. Keep the status only where it aids a bug report.
               (result.status === "aborted"
                 ? "⏹ Generation stopped."
-                : `⚠️ No reply produced (status: ${result.status}).`),
+                : result.status === "halted_step_bound"
+                  ? "⚠️ I couldn't finish that one — it took too many steps. Try narrowing or rephrasing the request."
+                  : `⚠️ No reply produced (status: ${result.status}).`),
           );
           maybeAutoTitle(conversationId);
         })
