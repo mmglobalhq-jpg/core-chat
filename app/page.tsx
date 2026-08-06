@@ -230,9 +230,12 @@ export default function Home() {
   );
 
   return (
-    <div className="flex h-screen w-full overflow-hidden bg-background">
+    <div className="app-shell flex w-full overflow-hidden bg-background">
       {/* Dark/light toggle, fixed to the top-right corner of the screen. */}
-      <div className="fixed right-3 top-3 z-40">
+      {/* Sits in the header's empty right-hand side on mobile; pt-safe keeps it
+          clear of the notch in landscape. Hiding it on small screens would remove
+          theme switching from the phone entirely, which is a regression, not a fix. */}
+      <div className="pt-safe fixed right-3 top-3 z-40">
         <ThemeToggle />
       </div>
       <Sidebar

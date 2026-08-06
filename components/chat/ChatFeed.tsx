@@ -51,8 +51,8 @@ export function ChatFeed({
   const shown = hasOlder ? messages.slice(messages.length - visibleCount) : messages;
 
   return (
-    <ScrollArea className="h-full w-full">
-      <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col px-4 pt-6 pb-44">
+    <ScrollArea className="overscroll-none-mobile h-full w-full">
+      <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col px-4 pt-4 pb-[calc(11rem+env(safe-area-inset-bottom))] md:pt-6 md:pb-44">
         {isEmpty ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-2 py-24 text-center">
             <h1 className="text-2xl font-semibold text-foreground">

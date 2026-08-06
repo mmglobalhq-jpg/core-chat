@@ -1,6 +1,6 @@
 "use client";
 
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ArrowUp, Plus, Square, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -23,6 +23,9 @@ import type { DocumentStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const MAX_TEXTAREA_HEIGHT = 200;
+// Apple HIG minimum touch target. The desktop 36px controls are noticeably fiddly
+// on a phone, especially Send, which sits next to the attach button.
+const TOUCH_TARGET = "size-11 md:size-9";
 const MAX_FILE_BYTES = 20 * 1024 * 1024; // 20 MB (matches the backend cap)
 const ACCEPT =
   ".pdf,.doc,.docx,.xls,.xlsx,.csv,.tsv,.txt,.md,.markdown,.html,.htm,.ppt,.pptx,.json,.png,.jpg,.jpeg";
@@ -139,7 +142,24 @@ export function ChatInput({ onSend, isStreaming = false, onStop }: ChatInputProp
     setPending([]);
   }
 
+  // `(pointer: coarse)` rather than a width breakpoint: it tracks the INPUT
+  // device, so a small desktop window keeps Enter-to-send and a large tablet does
+  // not. Read in an effect so SSR and first paint agree.
+  const [isTouch, setIsTouch] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(pointer: coarse)");
+    const sync = () => setIsTouch(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
+
   function handleKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
+    // Enter-to-send is a DESKTOP affordance. An iPhone keyboard has no Shift+Enter,
+    // so sending on Return makes a multi-line message impossible to type, and
+    // accepting an autocorrect suggestion can fire the send. Both ChatGPT and
+    // Gemini make Return a newline on mobile and send from the button only.
+    if (isTouch) return;
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       submit();
@@ -149,7 +169,7 @@ export function ChatInput({ onSend, isStreaming = false, onStop }: ChatInputProp
   return (
     <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10">
       <div className="chat-bottom-fade pointer-events-none h-40 w-full" />
-      <div className="pointer-events-auto absolute inset-x-0 bottom-4 flex justify-center px-4">
+      <div className="px-safe pointer-events-auto absolute inset-x-0 bottom-0 flex justify-center px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
         <div className="flex w-full max-w-3xl flex-col gap-2 rounded-[1.75rem] border border-border bg-card px-2 py-2 shadow-lg">
           {/* Pending / attached document chips */}
           {pending.length > 0 && (
@@ -186,7 +206,7 @@ export function ChatInput({ onSend, isStreaming = false, onStop }: ChatInputProp
                   variant="ghost"
                   size="icon"
                   aria-label="Add attachment"
-                  className="size-9 shrink-0 rounded-full"
+                  className={cn(TOUCH_TARGET, "shrink-0 rounded-full")}
                 >
                   <Plus className="size-5" />
                 </Button>
@@ -224,7 +244,7 @@ export function ChatInput({ onSend, isStreaming = false, onStop }: ChatInputProp
                 size="icon"
                 onClick={onStop}
                 aria-label="Stop generating"
-                className={cn("size-9 shrink-0 rounded-full")}
+                className={cn(TOUCH_TARGET, "shrink-0 rounded-full")}
               >
                 <Square className="size-4 fill-current" />
               </Button>
@@ -235,7 +255,7 @@ export function ChatInput({ onSend, isStreaming = false, onStop }: ChatInputProp
                 onClick={submit}
                 disabled={!sendable}
                 aria-label="Send message"
-                className={cn("size-9 shrink-0 rounded-full")}
+                className={cn(TOUCH_TARGET, "shrink-0 rounded-full")}
               >
                 <ArrowUp className="size-5" />
               </Button>

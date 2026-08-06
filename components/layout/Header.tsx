@@ -21,13 +21,13 @@ export function Header({ onMenuClick, onToggleSidebar }: HeaderProps) {
   const setSelectedModel = useChatStore((s) => s.setSelectedModel);
 
   return (
-    <header className="flex h-14 shrink-0 items-center gap-1 px-3">
+    <header className="pt-safe flex h-14 shrink-0 items-center gap-1 px-3">
       {/* Mobile: open the sidebar sheet. */}
       <Button
         type="button"
         variant="ghost"
         size="icon"
-        className="size-9 md:hidden"
+        className="size-11 md:hidden"
         onClick={onMenuClick}
         aria-label="Open menu"
       >

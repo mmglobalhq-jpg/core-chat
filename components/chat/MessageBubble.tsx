@@ -53,7 +53,7 @@ function MessageBubbleImpl({
         onClick={handleCopy}
         aria-label={copied ? "Copied" : "Copy message"}
         className={cn(
-          "size-7 shrink-0 self-end rounded-full text-muted-foreground",
+          "size-9 shrink-0 self-end rounded-full text-muted-foreground md:size-7",
           "opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100",
         )}
       >
@@ -87,7 +87,7 @@ function MessageBubbleImpl({
       {(content.length > 0 || (docs && docs.length > 0)) && (
         <div
           className={cn(
-            "flex max-w-[80%] flex-col gap-1.5",
+            "flex max-w-[90%] flex-col gap-1.5 md:max-w-[80%]",
             isUser ? "items-end" : "items-start",
           )}
         >
