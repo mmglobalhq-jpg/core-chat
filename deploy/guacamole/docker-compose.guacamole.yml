@@ -16,8 +16,23 @@
 # Secrets stay OUT of source: connection params reference env-rendered
 # guacamole-home/user-mapping.xml (gitignored); this file holds no secrets.
 
+# Bounded container logs. Docker's json-file driver defaults to UNBOUNDED, so a
+# long-running container writes until the disk fills — silent for months, then the
+# host wedges and everything on it stops at once, including the backups and the
+# watchdog meant to notice. 10 of 12 containers were unbounded when this was added.
+#
+# Set per service rather than as a daemon-wide default because log-driver options
+# are NOT reloadable via SIGHUP: a daemon default would need a dockerd restart,
+# whereas this applies on the next ordinary recreate.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   guacd:
+    logging: *default-logging
     image: guacamole/guacd:1.5.5
     container_name: guacd
     restart: unless-stopped
@@ -25,6 +40,7 @@ services:
       - guac-net
 
   guacamole:
+    logging: *default-logging
     image: guacamole/guacamole:1.5.5
     container_name: guacamole
     restart: unless-stopped
