@@ -56,7 +56,11 @@ export function Sidebar({
             <SheetTitle>Navigation</SheetTitle>
           </SheetHeader>
           <div className="flex h-full flex-col">
-            <SidebarBody onToggle={onToggle} showCollapse={false} />
+            <SidebarBody
+              onToggle={onToggle}
+              showCollapse={false}
+              onDismiss={() => onMobileOpenChange(false)}
+            />
           </div>
         </SheetContent>
       </Sheet>
@@ -65,11 +69,15 @@ export function Sidebar({
 }
 
 function SidebarBody({
+  onDismiss,
   onToggle,
   showCollapse,
 }: {
   onToggle: () => void;
   showCollapse: boolean;
+
+  /** Close the mobile drawer. Undefined on desktop, where there is none. */
+  onDismiss?: () => void;
 }) {
   const conversations = useChatStore((s) => s.conversations);
   const activeConversationId = useChatStore((s) => s.activeConversationId);
@@ -216,7 +224,7 @@ function SidebarBody({
 
       {/* Bottom: Settings (opens a bottom-left popup menu) + Sign out. */}
       <div className="border-t border-sidebar-border p-2">
-        <SettingsMenu />
+        <SettingsMenu onOpenSection={onDismiss} />
         <Button
           type="button"
           variant="ghost"

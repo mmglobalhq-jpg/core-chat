@@ -168,7 +168,8 @@ export function ChatInput({ onSend, isStreaming = false, onStop }: ChatInputProp
 
   return (
     <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10">
-      <div className="chat-bottom-fade pointer-events-none h-40 w-full" />
+      {/* 160px of fade is a third of a phone screen; keep it subtle there. */}
+      <div className="chat-bottom-fade pointer-events-none h-24 w-full md:h-40" />
       <div className="px-safe pointer-events-auto absolute inset-x-0 bottom-0 flex justify-center px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
         <div className="flex w-full max-w-3xl flex-col gap-2 rounded-[1.75rem] border border-border bg-card px-2 py-2 shadow-lg">
           {/* Pending / attached document chips */}

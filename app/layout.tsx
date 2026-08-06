@@ -18,6 +18,23 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Core Chat",
   description: "A personal AI assistant — Gemini-style chat UI.",
+  // iOS ignores the manifest's `display: standalone`; it needs these. Without
+  // them "Add to Home Screen" still opens inside Safari chrome.
+  appleWebApp: {
+    capable: true,
+    title: "Core Chat",
+    // "default" would leave a light status bar over the dark header. "black-translucent"
+    // lets the app paint under the status bar, which the safe-area insets already
+    // account for (viewportFit: "cover" below).
+    statusBarStyle: "black-translucent",
+  },
+  formatDetection: {
+    // Stops iOS turning dates and numbers in assistant replies into blue tap-to-call
+    // and tap-to-add links, which it does aggressively in chat text.
+    telephone: false,
+    date: false,
+    address: false,
+  },
 };
 
 // `viewportFit: "cover"` is what makes env(safe-area-inset-*) non-zero on a

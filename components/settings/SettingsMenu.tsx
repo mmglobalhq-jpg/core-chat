@@ -7,6 +7,7 @@
  * section opens a larger centered dialog with that section's content; Admin routes
  * to the /settings/admin page. Theme lives in the top-right toggle, not here.
  */
+import { cn } from "@/lib/utils";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -40,10 +41,22 @@ const SECTION_META: Record<Section, { title: string; icon: React.ReactNode }> = 
   desktop: { title: "Desktop", icon: <Monitor className="size-5 text-primary" /> },
 };
 
-export function SettingsMenu() {
+interface SettingsMenuProps {
+  /** Fired when a settings section opens. The mobile sidebar uses this to close
+   *  its drawer first, so the panel reads as a popup rather than a third layer
+   *  stacked over an open sheet. */
+  onOpenSection?: () => void;
+}
+
+export function SettingsMenu({ onOpenSection }: SettingsMenuProps = {}) {
   const isAdmin = useIsAdmin();
   const router = useRouter();
   const [section, setSection] = useState<Section | null>(null);
+
+  const openSection = (next: Section) => {
+    onOpenSection?.();
+    setSection(next);
+  };
 
   return (
     <>
@@ -59,16 +72,16 @@ export function SettingsMenu() {
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent side="top" align="start" sideOffset={8} className="w-56">
-          <DropdownMenuItem onClick={() => setSection("profile")}>
+          <DropdownMenuItem onClick={() => openSection("profile")}>
             <User className="size-4" />
             Profile
           </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => setSection("integrations")}>
+          <DropdownMenuItem onClick={() => openSection("integrations")}>
             <Plug className="size-4" />
             Integrations
           </DropdownMenuItem>
           {isAdmin && (
-            <DropdownMenuItem onClick={() => setSection("desktop")}>
+            <DropdownMenuItem onClick={() => openSection("desktop")}>
               <Monitor className="size-4" />
               Desktop
             </DropdownMenuItem>
@@ -100,13 +113,27 @@ function SettingsDialog({ section, onClose }: { section: Section; onClose: () =>
   const meta = SECTION_META[section];
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      // Bottom sheet on a phone, centred dialog from md up. A centred box is hard
+      // to reach one-handed and leaves the on-screen keyboard overlapping it when a
+      // field is focused; a sheet anchored to the bottom is the iOS convention.
+      className="fixed inset-0 z-50 flex items-end justify-center md:items-center md:p-4"
       role="dialog"
       aria-modal="true"
       aria-label={meta.title}
     >
       <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-      <div className="relative z-10 flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-xl border border-border bg-background shadow-xl">
+      <div
+        className={cn(
+          "relative z-10 flex w-full flex-col overflow-hidden border-border bg-background shadow-xl",
+          // 85dvh, not 85vh: on iOS Safari vh includes the area behind the toolbars,
+          // so the sheet would extend past the screen and clip its own content.
+          "max-h-[85dvh] rounded-t-2xl border-x-0 border-b-0 border-t",
+          "md:max-w-lg md:rounded-xl md:border",
+        )}
+      >
+        {/* Grab handle: signals "drag/dismissable" and gives a bigger tap area
+            above the content on touch. Decorative only. */}
+        <div className="mx-auto mt-2 h-1 w-9 shrink-0 rounded-full bg-muted-foreground/30 md:hidden" />
         <div className="flex items-center justify-between border-b border-border p-4">
           <div className="flex items-center gap-2">
             {meta.icon}
@@ -116,12 +143,13 @@ function SettingsDialog({ section, onClose }: { section: Section; onClose: () =>
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="rounded-lg p-1 text-muted-foreground hover:bg-muted"
+            className="-m-2 rounded-lg p-2 text-muted-foreground hover:bg-muted"
           >
-            <X className="size-4" />
+            <X className="size-5 md:size-4" />
           </button>
         </div>
-        <div className="overflow-y-auto p-4">
+        {/* pb-safe keeps the last control clear of the home indicator. */}
+        <div className="overscroll-none-mobile overflow-y-auto p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
           {section === "profile" ? (
             <ProfileSection />
           ) : section === "integrations" ? (

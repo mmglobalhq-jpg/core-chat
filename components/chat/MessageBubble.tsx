@@ -87,8 +87,13 @@ function MessageBubbleImpl({
       {(content.length > 0 || (docs && docs.length > 0)) && (
         <div
           className={cn(
-            "flex max-w-[90%] flex-col gap-1.5 md:max-w-[80%]",
-            isUser ? "items-end" : "items-start",
+            "flex flex-col gap-1.5",
+            // ChatGPT and Gemini both run ASSISTANT text edge-to-edge on a phone
+            // and keep a bubble only for the user. At 390px a bubble costs ~15% of
+            // the line and makes long answers scroll noticeably further.
+            isUser
+              ? "max-w-[85%] items-end md:max-w-[80%]"
+              : "max-w-full items-start md:max-w-[80%]",
           )}
         >
           {docs && docs.length > 0 && (
@@ -101,10 +106,14 @@ function MessageBubbleImpl({
           {content.length > 0 && (
             <div
               className={cn(
-                "rounded-2xl px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap break-words",
+                // 15px on mobile: 14px is a comfortable desktop reading size but
+                // cramped at arm's length on a phone.
+                "rounded-2xl px-4 py-2.5 text-[15px] leading-relaxed whitespace-pre-wrap break-words md:text-sm",
                 isUser
                   ? "rounded-br-md bg-primary text-primary-foreground"
-                  : "rounded-bl-md bg-muted text-foreground",
+                  : // No plate behind assistant text on mobile — the avatar already
+                    // marks who is speaking, so the panel is redundant chrome.
+                    "rounded-bl-md text-foreground max-md:bg-transparent max-md:px-0 md:bg-muted",
               )}
             >
               {content}
