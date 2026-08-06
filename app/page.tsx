@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Message as UIMessage } from "ai";
 import { Sidebar } from "@/components/layout/Sidebar";
+import { SettingsPanel } from "@/components/settings/SettingsMenu";
 import { Header } from "@/components/layout/Header";
 import { ChatFeed } from "@/components/chat/ChatFeed";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
@@ -262,6 +263,10 @@ export default function Home() {
           />
         </main>
       </div>
+
+      {/* Outside <Sidebar> on purpose: the mobile drawer unmounts its subtree when
+          it closes, which would take the panel with it. */}
+      <SettingsPanel />
     </div>
   );
 }

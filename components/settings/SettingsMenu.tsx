@@ -8,6 +8,7 @@
  * to the /settings/admin page. Theme lives in the top-right toggle, not here.
  */
 import { cn } from "@/lib/utils";
+import { useSettingsStore } from "@/store/useSettingsStore";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -51,11 +52,14 @@ interface SettingsMenuProps {
 export function SettingsMenu({ onOpenSection }: SettingsMenuProps = {}) {
   const isAdmin = useIsAdmin();
   const router = useRouter();
-  const [section, setSection] = useState<Section | null>(null);
+  // State lives in the store, not here: this component is inside the mobile Sheet,
+  // which unmounts its children on close, so local state would be destroyed by the
+  // very drawer-dismiss that is supposed to reveal the panel.
+  const setSection = useSettingsStore((st) => st.openSection);
 
   const openSection = (next: Section) => {
-    onOpenSection?.();
     setSection(next);
+    onOpenSection?.();
   };
 
   return (
@@ -98,9 +102,19 @@ export function SettingsMenu({ onOpenSection }: SettingsMenuProps = {}) {
         </DropdownMenuContent>
       </DropdownMenu>
 
-      {section && <SettingsDialog section={section} onClose={() => setSection(null)} />}
     </>
   );
+}
+
+/**
+ * The settings panel. Rendered by `app/page.tsx`, deliberately OUTSIDE the sidebar
+ * so closing the mobile drawer cannot unmount it. Returns null when nothing is open.
+ */
+export function SettingsPanel() {
+  const section = useSettingsStore((st) => st.section);
+  const closeSection = useSettingsStore((st) => st.closeSection);
+  if (!section) return null;
+  return <SettingsDialog section={section} onClose={closeSection} />;
 }
 
 function SettingsDialog({ section, onClose }: { section: Section; onClose: () => void }) {
