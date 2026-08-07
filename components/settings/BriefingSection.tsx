@@ -167,13 +167,39 @@ export function BriefingSection() {
         </div>
       </div>
 
-      <Toggle
-        label="Email it to me"
-        description="Not yet available — no mail provider is connected to the briefing service."
-        checked={prefs.deliver_email}
-        disabled
-        onChange={(deliver_email) => setPrefs({ ...prefs, deliver_email })}
-      />
+      <div className="space-y-2">
+        <Toggle
+          label="Email it to me"
+          description="Send the briefing to your inbox when it is generated."
+          checked={prefs.deliver_email}
+          onChange={(deliver_email) => setPrefs({ ...prefs, deliver_email })}
+        />
+        {prefs.deliver_email && (
+          <div className="space-y-1 pl-8">
+            <label htmlFor="briefing-email" className="text-sm font-medium text-foreground">
+              Send to
+            </label>
+            <input
+              id="briefing-email"
+              type="email"
+              inputMode="email"
+              autoComplete="email"
+              value={prefs.email_to ?? ""}
+              onChange={(e) => setPrefs({ ...prefs, email_to: e.target.value })}
+              placeholder="you@example.com"
+              className="min-h-11 w-full rounded-lg border border-border bg-background px-3 text-sm"
+            />
+            {/* The job sends only when the toggle is on AND an address is set, so
+                a half-filled form silently sends nothing. Say so rather than
+                letting someone believe they subscribed. */}
+            {!prefs.email_to?.trim() && (
+              <p className="text-sm text-muted-foreground">
+                No address yet — the briefing will be generated but not emailed.
+              </p>
+            )}
+          </div>
+        )}
+      </div>
 
       <div className="flex items-center gap-3">
         <Button type="button" onClick={save} disabled={saving} className="min-h-11">
