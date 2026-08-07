@@ -98,13 +98,22 @@ export function BriefingSection() {
     <div className="space-y-5">
       <Toggle
         label="Daily briefing"
-        description="Assemble one briefing a day from your topics."
+        description="One briefing a day: the top five stories plus a deep dive."
         checked={prefs.enabled}
         onChange={(enabled) => setPrefs({ ...prefs, enabled })}
       />
 
       <div className="space-y-2">
         <label className="text-sm font-medium text-foreground">Topics</label>
+        {/* Honest about the limit. Topics promote matching stories within the
+            news feeds the briefing is permitted to read — they do not go and
+            search the web, because no news-search source is available on terms
+            this pipeline will accept. Saying "from your topics" implied a
+            personalised feed that does not exist. */}
+        <p className="text-sm text-muted-foreground">
+          Stories matching these get promoted in the ranking. They don&apos;t add new
+          sources, so a topic the feeds don&apos;t cover won&apos;t appear.
+        </p>
         <div className="flex flex-wrap gap-2">
           {prefs.topics.map((topic) => (
             <button
