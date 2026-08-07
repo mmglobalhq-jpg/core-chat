@@ -16,6 +16,7 @@ import {
   ExternalLink,
   Loader2,
   Monitor,
+  Newspaper,
   Plug,
   Settings,
   ShieldCheck,
@@ -32,14 +33,16 @@ import {
 import { Button } from "@/components/ui/button";
 import { useProfile } from "@/lib/useProfile";
 import { useIsAdmin } from "@/lib/useIsAdmin";
+import { BriefingSection } from "@/components/settings/BriefingSection";
 import { supabase } from "@/lib/supabaseClient";
 
-type Section = "profile" | "integrations" | "desktop";
+type Section = "profile" | "integrations" | "desktop" | "briefing";
 
 const SECTION_META: Record<Section, { title: string; icon: React.ReactNode }> = {
   profile: { title: "Profile", icon: <User className="size-5 text-primary" /> },
   integrations: { title: "Integrations", icon: <Plug className="size-5 text-primary" /> },
   desktop: { title: "Desktop", icon: <Monitor className="size-5 text-primary" /> },
+  briefing: { title: "Daily briefing", icon: <Newspaper className="size-5 text-primary" /> },
 };
 
 interface SettingsMenuProps {
@@ -83,6 +86,10 @@ export function SettingsMenu({ onOpenSection }: SettingsMenuProps = {}) {
           <DropdownMenuItem onClick={() => openSection("integrations")}>
             <Plug className="size-4" />
             Integrations
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => openSection("briefing")}>
+            <Newspaper className="size-4" />
+            Daily briefing
           </DropdownMenuItem>
           {isAdmin && (
             <DropdownMenuItem onClick={() => openSection("desktop")}>
@@ -168,6 +175,8 @@ function SettingsDialog({ section, onClose }: { section: Section; onClose: () =>
             <ProfileSection />
           ) : section === "integrations" ? (
             <IntegrationsSection />
+          ) : section === "briefing" ? (
+            <BriefingSection />
           ) : (
             <DesktopSection />
           )}

@@ -82,7 +82,12 @@ describe("REIT Research page", () => {
     expect(
       screen.getByRole("option", { name: "Orchid Island Capital, Inc. (ORC)" }),
     ).toBeInTheDocument();
-    expect(replace).toHaveBeenCalledWith(expect.stringContaining("issuer=ARR"));
+    // waitFor, not a bare expect: `replace` is called from an effect that runs
+    // after the options render, so asserting synchronously is a race. It passed
+    // consistently until the suite grew and the timing shifted under load.
+    await waitFor(() =>
+      expect(replace).toHaveBeenCalledWith(expect.stringContaining("issuer=ARR")),
+    );
   });
 
   it("does not show ORC when the contract returns no ORC issuer", async () => {
