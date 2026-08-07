@@ -8,7 +8,7 @@
  * state lives in a component the drawer can unmount.
  */
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/lib/supabaseClient";
 import { DEFAULT_PREFS, type BriefingPrefs } from "@/lib/briefing";
@@ -154,6 +154,8 @@ export function BriefingSection() {
         </div>
       </div>
 
+      <SourcesEditor />
+
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1">
           <label htmlFor="briefing-time" className="text-sm font-medium text-foreground">
@@ -226,6 +228,153 @@ export function BriefingSection() {
         </Button>
         {status && <span className="text-sm text-muted-foreground">{status}</span>}
       </div>
+    </div>
+  );
+}
+
+interface UserSource {
+  id: string;
+  kind: string;
+  url: string;
+  name: string;
+  last_error: string | null;
+}
+
+/**
+ * Sites and feeds the user added.
+ *
+ * Paste a bare domain and the backend resolves its feed — that is the whole
+ * point, because almost nobody knows a site's RSS URL. When a site cannot be
+ * used, the backend's reason is shown verbatim: "this sits behind a paywall" is
+ * far more useful than "invalid source", and it is usually a decision by the
+ * publisher rather than a bug we could fix.
+ */
+function SourcesEditor() {
+  const [sources, setSources] = useState<UserSource[]>([]);
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [added, setAdded] = useState<string | null>(null);
+
+  const token = async () =>
+    (await supabase.auth.getSession()).data.session?.access_token ?? null;
+
+  const load = useCallback(async () => {
+    const t = await token();
+    if (!t) return;
+    const res = await fetch("/api/briefing/sources", {
+      headers: { Authorization: `Bearer ${t}` },
+    });
+    if (res.ok) setSources((await res.json()).sources ?? []);
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const add = async () => {
+    const url = draft.trim();
+    if (!url) return;
+    setBusy(true);
+    setError(null);
+    setAdded(null);
+    const t = await token();
+    if (!t) {
+      setError("Not signed in.");
+      setBusy(false);
+      return;
+    }
+    const res = await fetch("/api/briefing/sources", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${t}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (res.ok) {
+      setDraft("");
+      // Say what was actually added — pasting a homepage and getting its feed
+      // is surprising unless it is spelled out.
+      setAdded(
+        body.kind === "rss"
+          ? `Added ${body.name} — found its feed at ${body.url}`
+          : `Added ${body.name} — no feed, so headlines will be read from the page`,
+      );
+      await load();
+    } else {
+      setError(body.error ?? "Could not add that source.");
+    }
+    setBusy(false);
+  };
+
+  const remove = async (id: string) => {
+    const t = await token();
+    if (!t) return;
+    await fetch(`/api/briefing/sources?id=${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${t}` },
+    });
+    await load();
+  };
+
+  return (
+    <div className="space-y-2">
+      <label htmlFor="briefing-source" className="text-sm font-medium text-foreground">
+        Your sites and feeds
+      </label>
+      <p className="text-sm text-muted-foreground">
+        Paste any news site and we&apos;ll find its feed. Sites that block automated
+        readers, or sit behind a paywall, can&apos;t be added.
+      </p>
+
+      {sources.length > 0 && (
+        <ul className="divide-y divide-border rounded-lg border border-border">
+          {sources.map((s) => (
+            <li key={s.id} className="flex items-start justify-between gap-2 p-2">
+              <div className="min-w-0">
+                <div className="truncate text-sm text-foreground">{s.name}</div>
+                <div className="truncate text-xs text-muted-foreground">{s.url}</div>
+                {s.last_error && (
+                  <div className="text-xs text-destructive">{s.last_error}</div>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => void remove(s.id)}
+                aria-label={`Remove ${s.name}`}
+                className="min-h-11 shrink-0 rounded-lg px-2 text-sm text-muted-foreground hover:bg-muted"
+              >
+                Remove
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <div className="flex gap-2">
+        <input
+          id="briefing-source"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              void add();
+            }
+          }}
+          inputMode="url"
+          autoCapitalize="none"
+          autoCorrect="off"
+          placeholder="e.g. ft.com"
+          className="min-h-11 flex-1 rounded-lg border border-border bg-background px-3 text-sm"
+        />
+        <Button type="button" variant="secondary" className="min-h-11"
+                onClick={() => void add()} disabled={busy}>
+          {busy ? "Checking…" : "Add"}
+        </Button>
+      </div>
+
+      {added && <p className="text-sm text-muted-foreground">{added}</p>}
+      {error && <p className="text-sm text-destructive">{error}</p>}
     </div>
   );
 }
