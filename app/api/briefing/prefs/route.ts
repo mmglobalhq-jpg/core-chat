@@ -12,7 +12,10 @@ import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 
 export const dynamic = "force-dynamic";
 
-const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+// Seconds are optional because this API's OWN database returns `time` as
+// HH:MM:SS. Requiring HH:MM meant a client that round-tripped a stored value
+// unchanged got a 400 — the endpoint rejected what it had just served.
+const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MAX_TOPICS = 12;
 const MAX_TOPIC_LEN = 60;
@@ -45,10 +48,12 @@ export async function PUT(request: Request) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const deliverAt = typeof body.deliver_at === "string" ? body.deliver_at : "06:30";
-  if (!TIME_RE.test(deliverAt)) {
+  const rawTime = typeof body.deliver_at === "string" ? body.deliver_at : "06:30";
+  if (!TIME_RE.test(rawTime)) {
     return NextResponse.json({ error: "deliver_at must be HH:MM" }, { status: 400 });
   }
+  // Store canonically as HH:MM regardless of what arrived.
+  const deliverAt = rawTime.slice(0, 5);
 
   const timezone = typeof body.timezone === "string" ? body.timezone : "America/Chicago";
   try {

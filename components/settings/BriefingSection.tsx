@@ -44,7 +44,17 @@ export function BriefingSection() {
       if (!cancelled && res.ok) {
         const body = await res.json();
         // A user with no row yet is normal, not an error.
-        if (body.prefs) setPrefs({ ...DEFAULT_PREFS, ...body.prefs });
+        if (body.prefs) {
+          setPrefs({
+            ...DEFAULT_PREFS,
+            ...body.prefs,
+            // Postgres returns `time` as HH:MM:SS. The <input type="time"> only
+            // shows HH:MM, so slicing for display alone left the SECONDS in
+            // state — and saving a form nobody had touched posted "06:30:00",
+            // which the API rejected as malformed. Normalise on the way in.
+            deliver_at: String(body.prefs.deliver_at ?? "06:30").slice(0, 5),
+          });
+        }
       }
       if (!cancelled) setLoading(false);
     })();

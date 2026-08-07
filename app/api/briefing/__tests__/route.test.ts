@@ -104,6 +104,17 @@ describe("PUT /api/briefing/prefs", () => {
     expect((await put({ deliver_at: "25:99" })).status).toBe(400);
   });
 
+  it("accepts HH:MM:SS, which is what its own database returns", async () => {
+    // The round-trip bug: Postgres serves `time` as HH:MM:SS, the client sent it
+    // back unchanged, and the endpoint rejected the value it had just served.
+    expect((await put({ deliver_at: "06:30:00" })).status).toBe(200);
+  });
+
+  it("stores time canonically as HH:MM", async () => {
+    await put({ deliver_at: "06:30:00" });
+    expect(upsertCalls[0].deliver_at).toBe("06:30");
+  });
+
   it("rejects an unknown timezone", async () => {
     expect((await put({ deliver_at: "07:00", timezone: "Mars/Olympus" })).status).toBe(400);
   });
