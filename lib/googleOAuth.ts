@@ -7,6 +7,7 @@
  * who is connecting. Never import this from a client component — it reads secrets.
  */
 import crypto from "crypto";
+import { serverSecret } from "@/lib/serverSecret";
 
 export const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 export const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
@@ -43,7 +44,7 @@ export function redirectUri(): string {
 function stateKey(): Buffer {
   // Derive an HMAC key from the service-role secret (server-only, strong) with a
   // label so it isn't the raw key. Avoids adding yet another secret to manage.
-  const base = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const base = serverSecret("SUPABASE_SERVICE_ROLE_KEY");
   if (!base) throw new Error("Missing SUPABASE_SERVICE_ROLE_KEY");
   return crypto.createHash("sha256").update(base + "|google-oauth-state").digest();
 }

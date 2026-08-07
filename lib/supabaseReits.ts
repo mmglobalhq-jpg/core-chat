@@ -16,6 +16,7 @@
  * module stays explicit and isolated either way (dedicated env vars, own client).
  */
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { serverSecret } from "@/lib/serverSecret";
 
 // Hard server-only boundary: importing this module in the browser is a bug.
 if (typeof window !== "undefined") {
@@ -63,7 +64,7 @@ let client: SupabaseClient | null = null;
 export function getSupabaseReits(): SupabaseClient {
   if (client) return client;
   const url = process.env.REITS_SUPABASE_URL;
-  const key = process.env.REITS_SUPABASE_SERVICE_ROLE_KEY;
+  const key = serverSecret("REITS_SUPABASE_SERVICE_ROLE_KEY");
   if (!url || !key) {
     throw new Error("Missing REITS_SUPABASE_URL / REITS_SUPABASE_SERVICE_ROLE_KEY");
   }
