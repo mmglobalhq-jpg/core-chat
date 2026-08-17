@@ -58,4 +58,31 @@ describe("Sidebar Apps section", () => {
     const active = screen.getAllByRole("link", { name: "REIT" }).at(-1)!;
     expect(active).toHaveAttribute("aria-current", "page");
   });
+
+  it("has a Notes entry linking to /notes, without disturbing the others", () => {
+    renderSidebar();
+    expect(screen.getByRole("link", { name: "Notes" })).toHaveAttribute("href", "/notes");
+    // The entries Notes was added alongside are all still present.
+    expect(screen.getByRole("link", { name: "Funds" })).toHaveAttribute("href", "/funds");
+    expect(screen.getByRole("link", { name: "REIT" })).toHaveAttribute("href", "/reits");
+    expect(screen.getByRole("button", { name: "Knowledge Base" })).toBeInTheDocument();
+  });
+
+  it("marks the Notes entry active only when on /notes", () => {
+    renderSidebar();
+    expect(screen.getByRole("link", { name: "Notes" })).not.toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+
+    pathname = "/notes";
+    renderSidebar();
+    const active = screen.getAllByRole("link", { name: "Notes" }).at(-1)!;
+    expect(active).toHaveAttribute("aria-current", "page");
+    // Being on /notes must not light up a sibling.
+    expect(screen.getAllByRole("link", { name: "REIT" }).at(-1)!).not.toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+  });
 });
