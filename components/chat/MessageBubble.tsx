@@ -6,6 +6,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { LoadingIndicator } from "@/components/chat/LoadingIndicator";
 import { DocChip } from "@/components/chat/DocChip";
+import { MessageMarkdown } from "@/components/markdown/MessageMarkdown";
 import type { DocumentRow } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -108,15 +109,22 @@ function MessageBubbleImpl({
               className={cn(
                 // 15px on mobile: 14px is a comfortable desktop reading size but
                 // cramped at arm's length on a phone.
-                "rounded-2xl px-4 py-2.5 text-[15px] leading-relaxed whitespace-pre-wrap break-words md:text-sm",
+                "rounded-2xl px-4 py-2.5 text-[15px] leading-relaxed break-words md:text-sm",
+                // Only the USER's text keeps whitespace-pre-wrap. The assistant's
+                // goes through Markdown, which produces its own block elements —
+                // leaving pre-wrap on would double every newline, so a list would
+                // render with a blank line between each item.
                 isUser
-                  ? "rounded-br-md bg-primary text-primary-foreground"
+                  ? "whitespace-pre-wrap rounded-br-md bg-primary text-primary-foreground"
                   : // No plate behind assistant text on mobile — the avatar already
                     // marks who is speaking, so the panel is redundant chrome.
                     "rounded-bl-md text-foreground max-md:bg-transparent max-md:px-0 md:bg-muted",
               )}
             >
-              {content}
+              {/* User messages render literally: someone typing *asterisks* or a
+                  price like 5 * 3 means those characters, not emphasis. Only the
+                  assistant is treated as Markdown. */}
+              {isUser ? content : <MessageMarkdown content={content} streaming={loading} />}
             </div>
           )}
         </div>
