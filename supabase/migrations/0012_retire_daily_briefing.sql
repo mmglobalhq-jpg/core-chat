@@ -1,6 +1,16 @@
 -- Retire the daily briefing schema (sunset Phase H).
 --
--- ⚠ IRREVERSIBLE. Everything below is a DROP. Read the checklist before applying.
+-- ⚠ IRREVERSIBLE. Everything below is a DROP.
+--
+-- ✅ APPLIED to Core 2026-08-25, single transaction, over the aws-1 pooler. Verified against
+--    the real database rather than psql's exit code: 0 briefing_* tables left, 0 orphaned
+--    policies, and the 15 brief_* tables untouched.
+--
+-- NOT STAMPED into supabase_migrations.schema_migrations, deliberately: none of core-chat's
+-- 00xx migrations are in that table (0 of them, versus 8 for briefing-agent). Stamping this
+-- one would make it the only core-chat migration recorded there, which is more misleading
+-- than leaving the series consistent. How core-chat's migrations actually reach Core is an
+-- open question the source-of-truth docs do not answer.
 --
 -- WHAT THIS FINISHES. The briefing was replaced by `briefing-agent` (the `brief_*` tables in
 -- this same project). The cutover ran over 2026-08-24/25:
