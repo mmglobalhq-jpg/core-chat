@@ -20,6 +20,7 @@ import {
   Plug,
   Settings,
   ShieldCheck,
+  Upload,
   User,
   X,
 } from "lucide-react";
@@ -34,15 +35,17 @@ import { Button } from "@/components/ui/button";
 import { useProfile } from "@/lib/useProfile";
 import { useIsAdmin } from "@/lib/useIsAdmin";
 import { BriefingSection } from "@/components/settings/BriefingSection";
+import { FileUploadSection } from "@/components/settings/FileUploadSection";
 import { supabase } from "@/lib/supabaseClient";
 
-type Section = "profile" | "integrations" | "desktop" | "briefing";
+type Section = "profile" | "integrations" | "desktop" | "briefing" | "files";
 
 const SECTION_META: Record<Section, { title: string; icon: React.ReactNode }> = {
   profile: { title: "Profile", icon: <User className="size-5 text-primary" /> },
   integrations: { title: "Integrations", icon: <Plug className="size-5 text-primary" /> },
   desktop: { title: "Desktop", icon: <Monitor className="size-5 text-primary" /> },
   briefing: { title: "Daily briefing", icon: <Newspaper className="size-5 text-primary" /> },
+  files: { title: "File Upload", icon: <Upload className="size-5 text-primary" /> },
 };
 
 interface SettingsMenuProps {
@@ -91,6 +94,12 @@ export function SettingsMenu({ onOpenSection }: SettingsMenuProps = {}) {
             <Newspaper className="size-4" />
             Daily briefing
           </DropdownMenuItem>
+          {isAdmin && (
+            <DropdownMenuItem onClick={() => openSection("files")}>
+              <Upload className="size-4" />
+              File Upload
+            </DropdownMenuItem>
+          )}
           {isAdmin && (
             <DropdownMenuItem onClick={() => openSection("desktop")}>
               <Monitor className="size-4" />
@@ -177,6 +186,8 @@ function SettingsDialog({ section, onClose }: { section: Section; onClose: () =>
             <IntegrationsSection />
           ) : section === "briefing" ? (
             <BriefingSection />
+          ) : section === "files" ? (
+            <FileUploadSection />
           ) : (
             <DesktopSection />
           )}
