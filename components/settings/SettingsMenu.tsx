@@ -8,6 +8,7 @@
  * to the /settings/admin page. Theme lives in the top-right toggle, not here.
  */
 import { cn } from "@/lib/utils";
+import type { SettingsSection } from "@/store/useSettingsStore";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -16,7 +17,6 @@ import {
   ExternalLink,
   Loader2,
   Monitor,
-  Newspaper,
   Plug,
   Settings,
   ShieldCheck,
@@ -34,17 +34,17 @@ import {
 import { Button } from "@/components/ui/button";
 import { useProfile } from "@/lib/useProfile";
 import { useIsAdmin } from "@/lib/useIsAdmin";
-import { BriefingSection } from "@/components/settings/BriefingSection";
 import { FileUploadSection } from "@/components/settings/FileUploadSection";
 import { supabase } from "@/lib/supabaseClient";
 
-type Section = "profile" | "integrations" | "desktop" | "briefing" | "files";
+// The store owns this vocabulary. A local copy is how "briefing" survived in one place and
+// not the other when the section was removed — the build caught it, but only at the very end.
+type Section = SettingsSection;
 
 const SECTION_META: Record<Section, { title: string; icon: React.ReactNode }> = {
   profile: { title: "Profile", icon: <User className="size-5 text-primary" /> },
   integrations: { title: "Integrations", icon: <Plug className="size-5 text-primary" /> },
   desktop: { title: "Desktop", icon: <Monitor className="size-5 text-primary" /> },
-  briefing: { title: "Daily briefing", icon: <Newspaper className="size-5 text-primary" /> },
   files: { title: "File Upload", icon: <Upload className="size-5 text-primary" /> },
 };
 
@@ -89,10 +89,6 @@ export function SettingsMenu({ onOpenSection }: SettingsMenuProps = {}) {
           <DropdownMenuItem onClick={() => openSection("integrations")}>
             <Plug className="size-4" />
             Integrations
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => openSection("briefing")}>
-            <Newspaper className="size-4" />
-            Daily briefing
           </DropdownMenuItem>
           {isAdmin && (
             <DropdownMenuItem onClick={() => openSection("files")}>
@@ -184,8 +180,6 @@ function SettingsDialog({ section, onClose }: { section: Section; onClose: () =>
             <ProfileSection />
           ) : section === "integrations" ? (
             <IntegrationsSection />
-          ) : section === "briefing" ? (
-            <BriefingSection />
           ) : section === "files" ? (
             <FileUploadSection />
           ) : (

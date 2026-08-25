@@ -3,7 +3,7 @@
  *
  * ISOLATION IS THE `.eq("user_id", …)` FILTER, NOT RLS. These routes use the
  * service-role client, which bypasses RLS entirely — the same posture as every
- * other authenticated route here (see app/api/briefing/sources/route.ts). The
+ * other authenticated route here. The
  * policies in migration 0011 are defence in depth for any future caller that
  * uses the anon key; they are not what protects this path.
  *

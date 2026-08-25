@@ -1,7 +1,7 @@
 /**
  * Client-side types and fetchers for Notes.
  *
- * Unlike `lib/briefing.ts`, this is read AND write: a note is the user's own
+ * Read AND write, unlike the retired briefing reader: a note is the user's own
  * text, so the browser is the authoritative source for its content. What the
  * browser is never authoritative about is *whose* note it is — the API derives
  * `user_id` from the verified access token and ignores anything in the body.

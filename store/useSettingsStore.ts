@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-export type SettingsSection = "profile" | "integrations" | "desktop" | "briefing" | "files";
+export type SettingsSection = "profile" | "integrations" | "desktop" | "files";
 
 /**
  * Which settings panel is open, held ABOVE the sidebar.
