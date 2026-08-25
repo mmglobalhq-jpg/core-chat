@@ -10,6 +10,7 @@ import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { useChatStore, shouldAutoTitle } from "@/store/useChatStore";
 import { useChatSync } from "@/lib/useChatSync";
+import { toolActivityLabel } from "@/lib/toolActivity";
 import { sendChat, generateTitle } from "@/lib/api";
 import { attachToMessage, listDocumentsForChat } from "@/lib/documents";
 import type { Message } from "@/lib/types";
@@ -68,6 +69,9 @@ export default function Home() {
   // Tracks the in-flight streamed reply so the input can offer a Stop control
   // and so we can abort the fetch (and its downstream reader loop) on demand.
   const [isStreaming, setIsStreaming] = useState(false);
+  // What the backend is doing right now ("Searching the web…"). Cleared when the
+  // turn starts and when it ends, so a stale label can never outlive its run.
+  const [activity, setActivity] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const handleStop = useCallback(() => {
@@ -162,6 +166,7 @@ export default function Home() {
       setIsStreaming(true);
 
       let streamed = "";
+      setActivity(null);
       // Coalesce token writes to at most one store update per animation frame (~60/s)
       // instead of one per token. Each patch mints a new messages array and re-renders
       // the feed, so batching makes streaming render cost frame-bound rather than
@@ -194,6 +199,7 @@ export default function Home() {
         priorHistory,
         docIds,
         conversationId,
+        (toolName) => setActivity(toolActivityLabel(toolName)),
       )
         .then((result) => {
           finalize(
@@ -225,6 +231,7 @@ export default function Home() {
         .finally(() => {
           if (abortRef.current === controller) abortRef.current = null;
           setIsStreaming(false);
+          setActivity(null);
         });
     },
     [activeConversationId, selectedModelId],
@@ -255,6 +262,7 @@ export default function Home() {
             messages={messages}
             isStreaming={isStreaming}
             docsByMessage={docsByMessage}
+            activity={activity}
           />
           <ChatInput
             onSend={handleSend}

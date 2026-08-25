@@ -9,6 +9,8 @@ import type { DocumentRow } from "@/lib/types";
 
 interface ChatFeedProps {
   messages: UIMessage[];
+  /** What the backend is currently doing, for the streaming bubble's status line. */
+  activity?: string | null;
   /** True while the newest assistant reply is still streaming in. */
   isStreaming?: boolean;
   /** Attached documents keyed by message id (rendered as chips on that message). */
@@ -27,6 +29,7 @@ export function ChatFeed({
   messages,
   isStreaming = false,
   docsByMessage = {},
+  activity = null,
 }: ChatFeedProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const [visibleCount, setVisibleCount] = useState(WINDOW);
@@ -88,6 +91,11 @@ export function ChatFeed({
                     isStreaming &&
                     index === shown.length - 1 &&
                     message.role === "assistant"
+                  }
+                  activity={
+                    index === shown.length - 1 && message.role === "assistant"
+                      ? activity
+                      : null
                   }
                 />
               ) : null,

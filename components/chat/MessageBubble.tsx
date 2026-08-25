@@ -17,6 +17,10 @@ interface MessageBubbleProps {
   docs?: DocumentRow[];
   /** True for the trailing assistant bubble while it is still streaming/empty. */
   loading?: boolean;
+  /** What the backend is doing right now ("Searching the web…"), shown only while
+   *  this bubble is still waiting for its first token. Once text arrives the reply
+   *  itself is the status and the label would be noise. */
+  activity?: string | null;
 }
 
 // Memoized: during streaming the parent re-renders on every token flush, but only
@@ -29,6 +33,7 @@ function MessageBubbleImpl({
   content,
   docs,
   loading = false,
+  activity = null,
 }: MessageBubbleProps) {
   const isUser = role === "user";
   const [copied, setCopied] = useState(false);
@@ -85,6 +90,14 @@ function MessageBubbleImpl({
       {/* Attachment chips (above the bubble) + the message text. No bubble during
           the initial thinking phase (empty content) — the animated avatar carries
           the indication. */}
+      {/* Pre-first-token status. The avatar already says "thinking"; this says
+          WHAT it is doing, which is the part that was invisible. */}
+      {!isUser && loading && content.length === 0 && activity && (
+        <span className="mt-1.5 animate-pulse text-[13px] text-muted-foreground md:text-xs">
+          {activity}
+        </span>
+      )}
+
       {(content.length > 0 || (docs && docs.length > 0)) && (
         <div
           className={cn(

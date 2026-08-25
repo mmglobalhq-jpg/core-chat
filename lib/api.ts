@@ -4,7 +4,8 @@
  * Calls the same-origin Next.js proxy route (`/api/intent`), which streams the
  * backend's SSE token events. Reads the response body progressively with a
  * reader loop, invoking `onToken` for each `{"token": ...}` fragment as it
- * arrives, and resolves with the fully-accumulated reply + terminal status.
+ * arrives, `onActivity` for each `{"tool_call": ...}`, and resolves with the
+ * fully-accumulated reply + terminal status.
  * Throws with a human-readable message on any failure (non-stream error
  * envelope, threshold rejection, or backend unreachable).
  */
@@ -62,6 +63,10 @@ export async function sendChat(
   history?: { role: string; content: string }[],
   docIds?: string[],
   chatId?: string,
+  /** Fired with a tool's name each time the backend starts one, so the UI can say
+   *  what is happening. The backend has always emitted these; nothing consumed
+   *  them, so a turn spent searching looked the same as a turn that was slow. */
+  onActivity?: (toolName: string) => void,
 ): Promise<ChatResult> {
   const res = await fetch("/api/intent", {
     method: "POST",
@@ -99,7 +104,7 @@ export async function sendChat(
       .map((line) => line.slice(5).trim())
       .join("");
     if (!json) return;
-    let evt: { token?: string; status?: string };
+    let evt: { token?: string; status?: string; tool_call?: { name?: unknown } };
     try {
       evt = JSON.parse(json);
     } catch {
@@ -108,6 +113,9 @@ export async function sendChat(
     if (typeof evt.token === "string") {
       reply += evt.token;
       onToken?.(evt.token);
+    }
+    if (evt.tool_call && typeof evt.tool_call.name === "string") {
+      onActivity?.(evt.tool_call.name);
     }
     if (typeof evt.status === "string") {
       status = evt.status;
