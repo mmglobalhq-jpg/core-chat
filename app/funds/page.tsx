@@ -235,6 +235,10 @@ function FundManagerPage() {
   // Draft top-controls (edited but not executed until Submit).
   const [draft, setDraft] = useState<Committed>(committed);
   const [scopeLatest, setScopeLatest] = useState<string | null>(null);
+  // True once End is the user's OWN choice — typed into the field, or restored from a
+  // URL that carried one. Until then End is derived, and must follow the scope's latest
+  // date rather than whatever it was first seeded with. See the effect below.
+  const endPinnedRef = useRef<boolean>(Boolean(committed.end));
 
   // Results.
   const [data, setData] = useState<ChangesResponse | null>(null);
@@ -257,6 +261,9 @@ function FundManagerPage() {
   // navigation or Submit (back/forward restores the controls).
   useEffect(() => {
     setDraft(committed);
+    // A URL that carries an End is an explicit choice (a shared link, or back/forward
+    // onto a query the user submitted), so it must not be overwritten by the scope.
+    endPinnedRef.current = Boolean(committed.end);
     setQSecurity(sp.get("q_security") ?? "");
     setQDescription(sp.get("q_description") ?? "");
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -419,7 +426,8 @@ function FundManagerPage() {
   }
 
   function applyPreset(key: string) {
-    const end = draft.end || scopeLatest || "";
+    // Anchor on the scope's latest unless the user pinned an End themselves.
+    const end = (endPinnedRef.current ? draft.end : scopeLatest || draft.end) || "";
     if (!end) {
       setDraft((d) => ({ ...d, preset: key }));
       return;
@@ -427,10 +435,34 @@ function FundManagerPage() {
     setDraft((d) => ({ ...d, preset: key, end, start: presetStart(end, key) }));
   }
 
-  // Default the draft End to the latest available date when empty.
+  // End — and any active preset's Start — follow the SCOPE's latest available date.
+  //
+  // This used to fill End only when it was empty, so End kept whatever the *global*
+  // latest was at mount even after the user narrowed to one manager. That was invisible
+  // for as long as every daily poller shared a publication lag: the global maximum and
+  // the per-manager maximum were the same date, and a stale End happened to be right.
+  //
+  // Regan publishes same-day; JP Morgan publishes one business day in arrears. From
+  // 2026-09-02 the global maximum therefore ran a day ahead of JP's, and every JP
+  // preset query asked for a snapshot that could not exist yet — Start and End both
+  // resolved to the same older snapshot and the page reported "Insufficient history".
+  // A button that had worked for months began failing daily, and nothing about the
+  // poller was wrong.
+  //
+  // A user-chosen End is never overwritten; only a derived one follows the scope.
   useEffect(() => {
-    if (!draft.end && scopeLatest) setDraft((d) => ({ ...d, end: scopeLatest }));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (!scopeLatest || endPinnedRef.current) return;
+    setDraft((d) =>
+      d.end === scopeLatest
+        ? d
+        : {
+            ...d,
+            end: scopeLatest,
+            // Keep the preset's meaning intact: "1D" is one day back from the End that
+            // is actually in effect, not from the one it was seeded with.
+            start: d.preset ? presetStart(scopeLatest, d.preset) : d.start,
+          },
+    );
   }, [scopeLatest]);
 
   const fundsForManager = useMemo(
@@ -667,7 +699,10 @@ function FundManagerPage() {
               type="date"
               className={inputCls}
               value={draft.end}
-              onChange={(e) => setDraft((d) => ({ ...d, end: e.target.value, preset: "" }))}
+              onChange={(e) => {
+                endPinnedRef.current = true;
+                setDraft((d) => ({ ...d, end: e.target.value, preset: "" }));
+              }}
             />
           </Field>
 

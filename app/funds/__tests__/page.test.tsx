@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 
 const push = vi.fn();
 const replace = vi.fn();
@@ -382,5 +382,99 @@ describe("Fund Manager page", () => {
     // The share-class aliases are never separate fund options.
     expect(screen.queryByRole("option", { name: /^STYAX$/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("option", { name: /^WIPIX$/ })).not.toBeInTheDocument();
+  });
+});
+
+// --------------------------------------------------------------------------- //
+// Regression: the preset End must follow the SCOPE, not the global latest date
+// --------------------------------------------------------------------------- //
+//
+// Regan publishes same-day; JP Morgan publishes one business day in arrears. So the
+// global maximum as_of runs a day ahead of JP's. End was seeded from the global maximum
+// at mount and never updated when the user narrowed to a manager, so "1D" asked for a
+// JP snapshot that could not exist yet: Start and End resolved to the same older
+// snapshot and the page reported "Insufficient history" — every day, for a button that
+// had worked for months, with nothing wrong in the poller.
+//
+// This was invisible while every daily poller shared one lag. It returns the moment a
+// fourth source lands with yet another cadence, which is why it is pinned here.
+describe("preset End follows the scope's latest date", () => {
+  const MIXED_LAG_OPTIONS = {
+    managers: ["JP Morgan", "Regan"],
+    funds: [
+      { ticker: "JBND", fund_manager: "JP Morgan" },
+      { ticker: "MBSX", fund_manager: "Regan" },
+    ],
+    latestDate: "2026-09-04", // global max — Regan's, a day ahead of JP's
+  };
+
+  /** latest-date is scope-aware: JP trails the global maximum by one business day. */
+  function mockMixedLagFetch() {
+    return vi.fn(async (url: string) => {
+      if (url.startsWith("/api/funds/options")) return jsonResponse(MIXED_LAG_OPTIONS);
+      if (url.startsWith("/api/funds/latest-date")) {
+        const scoped = url.includes("manager=JP+Morgan") || url.includes("manager=JP%20Morgan");
+        return jsonResponse({ latestDate: scoped ? "2026-09-03" : "2026-09-04" });
+      }
+      if (url.startsWith("/api/funds/filter-options")) return jsonResponse(DEFAULT_FILTER);
+      if (url.startsWith("/api/funds/changes")) return jsonResponse({ changes: [], fund_status: [], pagination: { page: 1, page_size: 100, total_rows: 0, total_pages: 0 } });
+      return jsonResponse({});
+    });
+  }
+
+  it("seeds End from the global latest before a manager is chosen", async () => {
+    vi.stubGlobal("fetch", mockMixedLagFetch());
+    render(<FundsPage />);
+    expect(await screen.findByDisplayValue("2026-09-04")).toBeTruthy();
+  });
+
+  it("moves End back when the user SELECTS a manager after End was seeded", async () => {
+    // The sequence is the bug. Putting the manager in the URL does not reproduce it:
+    // End is still empty when the scoped date arrives, so even the old code filled it
+    // correctly. The failure needs End already seeded from the global maximum, and the
+    // manager chosen afterwards — which is exactly what a person does.
+    vi.stubGlobal("fetch", mockMixedLagFetch());
+    render(<FundsPage />);
+    await screen.findByDisplayValue("2026-09-04"); // seeded from the global max
+
+    const manager = screen.getByLabelText("Fund Manager") as HTMLSelectElement;
+    fireEvent.change(manager, { target: { value: "JP Morgan" } });
+
+    // End must follow the scope down to JP's date, or "1D" asks for a snapshot that
+    // cannot exist yet.
+    expect(await screen.findByDisplayValue("2026-09-03")).toBeTruthy();
+    expect(screen.queryByDisplayValue("2026-09-04")).toBeNull();
+  });
+
+  it("recomputes an active preset's Start when the scope moves End", async () => {
+    vi.stubGlobal("fetch", mockMixedLagFetch());
+    render(<FundsPage />);
+    await screen.findByDisplayValue("2026-09-04");
+
+    fireEvent.click(screen.getByText("1D"));
+    await screen.findByDisplayValue("2026-09-03"); // start = global end - 1
+
+    fireEvent.change(screen.getByLabelText("Fund Manager") as HTMLSelectElement, {
+      target: { value: "JP Morgan" },
+    });
+
+    // End -> 09-03 (JP's latest) and Start -> 09-02, so the two resolve to DIFFERENT
+    // snapshots. Leaving Start at 09-03 would collapse both onto one.
+    expect(await screen.findByDisplayValue("2026-09-02")).toBeTruthy();
+    expect(await screen.findByDisplayValue("2026-09-03")).toBeTruthy();
+  });
+
+  it("does not overwrite an End the URL explicitly carried", async () => {
+    // A shared link or back/forward is a deliberate choice and must survive.
+    currentParams = new URLSearchParams({
+      manager: "JP Morgan",
+      start: "2026-08-01",
+      end: "2026-08-15",
+      preset: "",
+    });
+    vi.stubGlobal("fetch", mockMixedLagFetch());
+    render(<FundsPage />);
+    const end = await screen.findByDisplayValue("2026-08-15");
+    expect(end).toBeTruthy();
   });
 });
