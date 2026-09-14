@@ -61,6 +61,34 @@ export type FundStatusCode =
   | "no_start_snapshot"
   | "no_end_snapshot";
 
+/**
+ * How the RPC resolved this fund's window.
+ *  - "date"     — the user typed Start/End. Start is INCLUSIVE: the baseline is the
+ *                 last snapshot *before* it, so a holding added on the start date
+ *                 shows up as Added (migration 0009).
+ *  - "lookback" — a range preset. Each fund independently compares its own newest
+ *                 snapshot against the one N snapshots earlier, so funds with
+ *                 different publication lags are all correct in one query.
+ */
+export type ResolutionMode = "date" | "lookback";
+
+/**
+ * Range presets are counted in SNAPSHOTS, not calendar days. Every snapshot is a
+ * trading day for these sources, so counting them is automatically weekend-,
+ * holiday- and lag-aware — the browser never needs an NYSE calendar it would have
+ * to keep in step with the poller's `market_calendar.py` by hand.
+ *
+ * A fund with less history than the preset asks for is clamped to its oldest
+ * snapshot, and the resolved dates are shown per fund, so a shortened window is
+ * always visible rather than implied.
+ */
+export const PRESET_LOOKBACK: Record<string, number> = {
+  "1D": 1, // previous trading session
+  "7D": 5, // one trading week
+  "30D": 21, // one trading month
+  "1Y": 252, // one trading year
+};
+
 export type FundStatus = {
   fund_manager: string;
   fund_ticker: string;
@@ -70,6 +98,7 @@ export type FundStatus = {
   actual_start_date: string | null;
   actual_end_date: string | null;
   status: FundStatusCode;
+  resolution_mode?: ResolutionMode;
   matching_row_count: number;
   warning_count: number;
   reason: string | null;
@@ -115,11 +144,13 @@ export type ChangesResponse = {
 };
 
 // Parameters passed to the get_fund_position_changes RPC (all validated).
+// Exactly one of (p_start_date + p_end_date) or p_lookback is populated.
 export type ChangesRpcArgs = {
   p_manager: string | null;
   p_fund: string | null;
-  p_start_date: string;
-  p_end_date: string;
+  p_start_date: string | null;
+  p_end_date: string | null;
+  p_lookback: number | null;
   p_page: number;
   p_page_size: number;
   p_sort_column: SortColumn;
@@ -159,13 +190,21 @@ export type ValidationResult<T> = { ok: true; value: T } | { ok: false; error: s
  * trusts client-provided sort columns, page sizes, dates, or change types.
  */
 export function validateChangesQuery(sp: URLSearchParams): ValidationResult<ChangesRpcArgs> {
-  const start = parseIsoDate(sp.get("start"));
-  const end = parseIsoDate(sp.get("end"));
-  if (!start || !end) {
-    return { ok: false, error: "start and end must be valid ISO dates (YYYY-MM-DD)" };
+  // A range preset resolves per fund in the RPC and carries no dates. It wins over
+  // any stale start/end left in the URL, so the two can never disagree.
+  const lookback = parseLookback(sp.get("preset"));
+  if (sp.get("preset") && lookback == null) {
+    return { ok: false, error: `invalid_preset: ${sp.get("preset")}` };
   }
-  if (start > end) {
-    return { ok: false, error: "invalid_date_range: start date is after end date" };
+  const start = lookback == null ? parseIsoDate(sp.get("start")) : null;
+  const end = lookback == null ? parseIsoDate(sp.get("end")) : null;
+  if (lookback == null) {
+    if (!start || !end) {
+      return { ok: false, error: "start and end must be valid ISO dates (YYYY-MM-DD)" };
+    }
+    if (start > end) {
+      return { ok: false, error: "invalid_date_range: start date is after end date" };
+    }
   }
 
   const pageRaw = Number(sp.get("page") ?? "1");
@@ -197,6 +236,7 @@ export function validateChangesQuery(sp: URLSearchParams): ValidationResult<Chan
       p_fund: optText(sp.get("fund")),
       p_start_date: start,
       p_end_date: end,
+      p_lookback: lookback,
       p_page: page,
       p_page_size: sizeRaw,
       p_sort_column: sortCol,
@@ -208,6 +248,12 @@ export function validateChangesQuery(sp: URLSearchParams): ValidationResult<Chan
       p_change_types: changeTypes,
     },
   };
+}
+
+/** A known range preset mapped to its snapshot count, or null if absent/unknown. */
+export function parseLookback(preset: string | null | undefined): number | null {
+  if (!preset) return null;
+  return PRESET_LOOKBACK[preset.trim().toUpperCase()] ?? null;
 }
 
 /** change_type may arrive repeated or comma-joined; normalise to a list or null. */
@@ -239,6 +285,7 @@ export function validateExportQuery(
       p_fund: v.p_fund,
       p_start_date: v.p_start_date,
       p_end_date: v.p_end_date,
+      p_lookback: v.p_lookback,
       p_security_id_search: v.p_security_id_search,
       p_description_search: v.p_description_search,
       p_security_type: v.p_security_type,

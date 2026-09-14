@@ -115,6 +115,7 @@ export async function GET(request: Request) {
     p_fund: args.p_fund,
     p_start_date: args.p_start_date,
     p_end_date: args.p_end_date,
+    p_lookback: args.p_lookback,
     p_page: 1,
     p_page_size: 50,
     p_sort_column: "position_change",
@@ -139,7 +140,13 @@ export async function GET(request: Request) {
   const mode = getComparisonMode(probed?.changes ?? [], probed?.fund_status ?? []);
 
   const encoder = new TextEncoder();
-  const filename = `fund-position-changes_${args.p_start_date}_${args.p_end_date}.csv`;
+  // In lookback mode there is no single window — each fund resolved its own — so
+  // the file is named for the preset rather than for dates it does not have.
+  const span =
+    args.p_lookback == null
+      ? `${args.p_start_date}_${args.p_end_date}`
+      : `last-${args.p_lookback}-session${args.p_lookback === 1 ? "" : "s"}`;
+  const filename = `fund-position-changes_${span}.csv`;
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {

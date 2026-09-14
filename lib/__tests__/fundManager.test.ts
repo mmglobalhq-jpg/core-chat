@@ -16,6 +16,8 @@ import {
   fundDisplayLabel,
   UNMAPPED_TOKEN,
   UNMAPPED_LABEL,
+  PRESET_LOOKBACK,
+  parseLookback,
 } from "@/lib/fundManager";
 
 function sp(obj: Record<string, string | string[]>): URLSearchParams {
@@ -310,5 +312,57 @@ describe("fundDisplayLabel", () => {
   });
   it("returns the ticker unchanged (no aliases) for JP Morgan / unknown funds", () => {
     expect(fundDisplayLabel("JCPUX")).toEqual({ label: "JCPUX", aliases: [] });
+  });
+});
+
+describe("range presets resolve as a per-fund lookback, not as dates", () => {
+  it("maps every preset to a trading-session count", () => {
+    expect(PRESET_LOOKBACK).toEqual({ "1D": 1, "7D": 5, "30D": 21, "1Y": 252 });
+  });
+
+  it("parses a known preset case-insensitively and rejects anything else", () => {
+    expect(parseLookback("1D")).toBe(1);
+    expect(parseLookback("30d")).toBe(21);
+    expect(parseLookback(null)).toBeNull();
+    expect(parseLookback("6M")).toBeNull();
+  });
+
+  it("sends a lookback and NO dates when a preset is present", () => {
+    const r = validateChangesQuery(new URLSearchParams({ manager: "Regan", preset: "1D" }));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.p_lookback).toBe(1);
+    expect(r.value.p_start_date).toBeNull();
+    expect(r.value.p_end_date).toBeNull();
+  });
+
+  it("lets the preset win over stale dates left in the URL", () => {
+    // The two modes are mutually exclusive; the server must never have to guess.
+    const r = validateChangesQuery(
+      new URLSearchParams({ preset: "7D", start: "2026-09-13", end: "2026-09-14" }),
+    );
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.p_lookback).toBe(5);
+    expect(r.value.p_start_date).toBeNull();
+  });
+
+  it("rejects an unknown preset rather than silently falling back to dates", () => {
+    const r = validateChangesQuery(
+      new URLSearchParams({ preset: "5Y", start: "2026-09-13", end: "2026-09-14" }),
+    );
+    expect(r.ok).toBe(false);
+  });
+
+  it("still requires dates when no preset is given", () => {
+    expect(validateChangesQuery(new URLSearchParams({ manager: "Regan" })).ok).toBe(false);
+  });
+
+  it("carries the lookback through to the export args", () => {
+    const r = validateExportQuery(new URLSearchParams({ preset: "30D" }));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.p_lookback).toBe(21);
+    expect(r.value.p_start_date).toBeNull();
   });
 });

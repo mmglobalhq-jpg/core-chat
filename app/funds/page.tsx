@@ -118,25 +118,16 @@ const PRESETS: { key: string; label: string }[] = [
   { key: "1Y", label: "1Y" },
 ];
 
-function addDays(iso: string, n: number): string {
-  const [y, m, d] = iso.split("-").map(Number);
-  const dt = new Date(Date.UTC(y, m - 1, d));
-  dt.setUTCDate(dt.getUTCDate() + n);
-  return dt.toISOString().slice(0, 10);
-}
-function addYears(iso: string, n: number): string {
-  const [y, m, d] = iso.split("-").map(Number);
-  const dt = new Date(Date.UTC(y - n, m - 1, d));
-  return dt.toISOString().slice(0, 10);
-}
-/** Requested start date for a preset relative to a requested end date. */
-function presetStart(end: string, key: string): string {
-  if (key === "1D") return addDays(end, -1);
-  if (key === "7D") return addDays(end, -7);
-  if (key === "30D") return addDays(end, -30);
-  if (key === "1Y") return addYears(end, 1);
-  return end;
-}
+// Presets no longer compute dates in the browser. They send the preset key, and the
+// RPC resolves each fund against its own snapshot history (see PRESET_LOOKBACK).
+//
+// The old arithmetic was `end - N calendar days`, which had two faults. It counted
+// calendar days, so on a Monday "1D" asked for Sunday — a date no fund publishes.
+// And a single date pair cannot be right for funds with different publication lags:
+// MBSX publishes same-day while MBSF runs a business day behind, so on 2026-09-14
+// the "1D" window was blank for 16 of 17 funds. Counting snapshots instead is
+// weekend-, holiday- and lag-aware without the browser carrying an NYSE calendar.
+
 /** DD/MM/YY display format for resolved dates (never a polling timestamp). */
 function fmtDMY(iso: string | null): string {
   if (!iso) return "—";
@@ -223,7 +214,9 @@ function FundManagerPage() {
   const router = useRouter();
   const sp = useSearchParams();
   const committed = readCommitted(sp);
-  const hasQuery = Boolean(committed.start && committed.end);
+  // A preset is a complete query on its own — it needs no dates, because each fund
+  // resolves its own window server-side.
+  const hasQuery = Boolean((committed.start && committed.end) || committed.preset);
 
   // Options.
   const [managers, setManagers] = useState<string[]>([]);
@@ -319,21 +312,44 @@ function FundManagerPage() {
       .catch(() => {});
   }, [draft.manager, draft.fund]);
 
-  // Filter-option values for the committed scope.
+  // Filter-option values for the committed scope, narrowed to the two snapshots
+  // actually being compared. Passing the window is what keeps this fast — unscoped
+  // it walks all of history (38.5 s for JP Morgan in production) — and it also stops
+  // the dropdowns offering values that cannot appear in the result.
+  //
+  // It runs alongside the table fetch rather than after it, so a slow lookup never
+  // delays the rows.
   useEffect(() => {
     if (!hasQuery) return;
     const p = new URLSearchParams();
     if (committed.manager) p.set("manager", committed.manager);
     if (committed.fund) p.set("fund", committed.fund);
+    if (committed.preset) p.set("preset", committed.preset);
+    else {
+      p.set("start", committed.start);
+      p.set("end", committed.end);
+    }
+    let live = true;
     authedFetch(`/api/funds/filter-options?${p}`)
       .then((r) => r.json())
       .then((d) => {
+        if (!live) return;
         setSecurityTypes(d.security_types ?? []);
         setSectorTypes(d.sector_types ?? []);
         setSectorHasNull(Boolean(d.sector_has_null));
       })
       .catch(() => {});
-  }, [hasQuery, committed.manager, committed.fund]);
+    return () => {
+      live = false;
+    };
+  }, [
+    hasQuery,
+    committed.manager,
+    committed.fund,
+    committed.preset,
+    committed.start,
+    committed.end,
+  ]);
 
   // Fetch the table whenever any URL param changes (server-driven; race-safe).
   const spString = sp.toString();
@@ -346,9 +362,10 @@ function FundManagerPage() {
     const ctrl = new AbortController();
     setLoading(true);
     setError(null);
-    const params = new URLSearchParams(spString);
-    params.delete("preset");
-    authedFetch(`/api/funds/changes?${params}`, { signal: ctrl.signal })
+    // `preset` is forwarded, not stripped: the server maps it to a per-fund
+    // lookback. Stripping it here was safe only while presets were pre-resolved
+    // into dates in the browser.
+    authedFetch(`/api/funds/changes?${spString}`, { signal: ctrl.signal })
       .then(async (r) => {
         const body = await r.json();
         if (!r.ok) throw new Error(body.error ?? `Request failed (${r.status})`);
@@ -412,57 +429,49 @@ function FundManagerPage() {
   );
 
   function submit() {
-    if (!draft.start || !draft.end) return;
+    if (!draft.preset && (!draft.start || !draft.end)) return;
     // A new comparison is a history entry; filters/sort/page reset.
     const next = new URLSearchParams();
     if (draft.manager) next.set("manager", draft.manager);
     if (draft.fund) next.set("fund", draft.fund);
-    next.set("start", draft.start);
-    next.set("end", draft.end);
-    if (draft.preset) next.set("preset", draft.preset);
+    if (draft.preset) {
+      next.set("preset", draft.preset);
+    } else {
+      next.set("start", draft.start);
+      next.set("end", draft.end);
+    }
     next.set("page", "1");
     next.set("page_size", sp.get("page_size") ?? String(DEFAULT_PAGE_SIZE));
     router.push(`/funds?${next.toString()}`);
   }
 
   function applyPreset(key: string) {
-    // Anchor on the scope's latest unless the user pinned an End themselves.
-    const end = (endPinnedRef.current ? draft.end : scopeLatest || draft.end) || "";
-    if (!end) {
-      setDraft((d) => ({ ...d, preset: key }));
-      return;
-    }
-    setDraft((d) => ({ ...d, preset: key, end, start: presetStart(end, key) }));
+    // A preset carries no dates: each fund is resolved against its own latest
+    // snapshot server-side. Clearing start/end keeps the two from disagreeing, and
+    // un-pins End so typing a date later is recognised as a deliberate choice.
+    endPinnedRef.current = false;
+    setDraft((d) => ({ ...d, preset: d.preset === key ? "" : key, start: "", end: "" }));
   }
 
-  // End — and any active preset's Start — follow the SCOPE's latest available date.
+  // A derived End follows the SCOPE's latest available date, so the manual date
+  // fields open somewhere the selected manager actually has data.
   //
   // This used to fill End only when it was empty, so End kept whatever the *global*
   // latest was at mount even after the user narrowed to one manager. That was invisible
   // for as long as every daily poller shared a publication lag: the global maximum and
   // the per-manager maximum were the same date, and a stale End happened to be right.
   //
-  // Regan publishes same-day; JP Morgan publishes one business day in arrears. From
-  // 2026-09-02 the global maximum therefore ran a day ahead of JP's, and every JP
-  // preset query asked for a snapshot that could not exist yet — Start and End both
-  // resolved to the same older snapshot and the page reported "Insufficient history".
-  // A button that had worked for months began failing daily, and nothing about the
-  // poller was wrong.
+  // Anchoring on the scope fixed that for a single manager, but could not reach the
+  // two cases that remained: lag that differs *within* one manager (MBSF trails MBSX
+  // by a business day), and the All Managers scope, whose maximum belongs to whichever
+  // source publishes earliest. On 2026-09-14 a 1D preset was blank for 16 of 17 funds.
+  // Presets no longer carry dates at all — each fund resolves its own window — so this
+  // effect now only seeds the manual fields.
   //
   // A user-chosen End is never overwritten; only a derived one follows the scope.
   useEffect(() => {
     if (!scopeLatest || endPinnedRef.current) return;
-    setDraft((d) =>
-      d.end === scopeLatest
-        ? d
-        : {
-            ...d,
-            end: scopeLatest,
-            // Keep the preset's meaning intact: "1D" is one day back from the End that
-            // is actually in effect, not from the one it was seeded with.
-            start: d.preset ? presetStart(scopeLatest, d.preset) : d.start,
-          },
-    );
+    setDraft((d) => (d.preset || d.end === scopeLatest ? d : { ...d, end: scopeLatest }));
   }, [scopeLatest]);
 
   const fundsForManager = useMemo(
@@ -569,8 +578,8 @@ function FundManagerPage() {
     setExporting(true);
     setError(null);
     try {
+      // `preset` is kept — the export RPC resolves it per fund exactly as the table does.
       const params = new URLSearchParams(spString);
-      params.delete("preset");
       params.delete("page");
       params.delete("page_size");
       const res = await authedFetch(`/api/funds/export?${params}`);
@@ -582,7 +591,9 @@ function FundManagerPage() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `fund-position-changes_${committed.start}_${committed.end}.csv`;
+      a.download = committed.preset
+        ? `fund-position-changes_${committed.preset}.csv`
+        : `fund-position-changes_${committed.start}_${committed.end}.csv`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -686,18 +697,20 @@ function FundManagerPage() {
             </select>
           </Field>
 
+          {/* Typing a date drops the preset — the two modes are mutually exclusive. */}
           <Field label="Start Date" className="w-40">
             <input
               type="date"
-              className={inputCls}
+              className={cn(inputCls, draft.preset && "opacity-50")}
               value={draft.start}
+              placeholder={draft.preset ? "per fund" : undefined}
               onChange={(e) => setDraft((d) => ({ ...d, start: e.target.value, preset: "" }))}
             />
           </Field>
           <Field label="End Date" className="w-40">
             <input
               type="date"
-              className={inputCls}
+              className={cn(inputCls, draft.preset && "opacity-50")}
               value={draft.end}
               onChange={(e) => {
                 endPinnedRef.current = true;
@@ -722,14 +735,20 @@ function FundManagerPage() {
             </div>
           </Field>
 
-          <Button type="button" onClick={submit} disabled={!draft.start || !draft.end || dateRangeInvalid}>
+          <Button
+            type="button"
+            onClick={submit}
+            disabled={(!draft.preset && (!draft.start || !draft.end)) || dateRangeInvalid}
+          >
             Submit
           </Button>
         </div>
         <p className="mt-2 text-xs text-muted-foreground">
           {dateRangeInvalid
             ? "Start Date must be on or before End Date."
-            : "Dates are resolved per fund to the latest accepted snapshot on or before each requested date (shown as DD/MM/YY in each fund header). Future dates are allowed."}
+            : draft.preset
+              ? `${draft.preset}: each fund is compared against its own trading history, so funds that publish on different schedules are all up to date. The resolved dates are shown in each fund header.`
+              : "Start Date is inclusive — changes made on that date are included. Each fund resolves to its own nearest snapshots, shown as DD/MM/YY in the fund header. Future dates are allowed."}
         </p>
       </section>
 
@@ -1042,7 +1061,12 @@ function FundGroup({
             )}
             <span className="font-mono text-sm font-semibold text-foreground">{ticker}</span>
             <span className="text-xs text-muted-foreground">
-              {fmtDMY(status?.actual_start_date ?? null)} → {fmtDMY(status?.actual_end_date ?? null)}
+              {/* The first date is the comparison BASELINE — the snapshot changes are
+                  measured against — not the first day of the requested window. */}
+              <span title="Comparison baseline — changes are measured from this snapshot">
+                baseline {fmtDMY(status?.actual_start_date ?? null)}
+              </span>{" "}
+              → {fmtDMY(status?.actual_end_date ?? null)}
               {" · "}
               {rows.length} on page of {status?.matching_row_count ?? rows.length} rows
               {status && status.warning_count > 0 && (

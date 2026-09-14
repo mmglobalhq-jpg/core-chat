@@ -280,8 +280,10 @@ describe("Fund Manager page", () => {
     vi.stubGlobal("fetch", mockFetch(CHANGES));
     render(<FundsPage />);
 
-    // Fund group header with resolved dates (DD/MM/YY) and matching count.
-    expect(await screen.findByText(/01\/06\/26 → 02\/06\/26/)).toBeInTheDocument();
+    // Fund group header with resolved dates (DD/MM/YY) and matching count. The first
+    // date is labelled as the comparison baseline, so the text spans two elements.
+    expect(await screen.findByText(/baseline 01\/06\/26/)).toBeInTheDocument();
+    expect(screen.getByText(/02\/06\/26/)).toBeInTheDocument();
     expect(screen.getByText(/of 2 rows/)).toBeInTheDocument();
     // "JBND" appears in the dropdown option, the group header, and the row cell.
     expect(screen.getAllByText("JBND").length).toBeGreaterThanOrEqual(2);
@@ -446,22 +448,69 @@ describe("preset End follows the scope's latest date", () => {
     expect(screen.queryByDisplayValue("2026-09-04")).toBeNull();
   });
 
-  it("recomputes an active preset's Start when the scope moves End", async () => {
+  it("submits a preset with NO dates, so each fund resolves its own window", async () => {
+    // The whole point of the change. A preset used to be pre-resolved in the browser
+    // into one (start, end) pair, which cannot be right for funds on different
+    // publication schedules: on 2026-09-14 a 1D window was blank for 16 of 17 funds,
+    // and it counted calendar days, so on a Monday it asked for Sunday.
+    vi.stubGlobal("fetch", mockMixedLagFetch());
+    render(<FundsPage />);
+    await screen.findByDisplayValue("2026-09-04"); // End seeded for manual entry
+
+    fireEvent.click(screen.getByText("1D"));
+    fireEvent.click(screen.getByText("Submit"));
+
+    expect(push).toHaveBeenCalled();
+    const url = new URLSearchParams(
+      (push.mock.calls.at(-1)![0] as string).split("?")[1],
+    );
+    expect(url.get("preset")).toBe("1D");
+    expect(url.get("start")).toBeNull();
+    expect(url.get("end")).toBeNull();
+  });
+
+  it("clears the preset as soon as a date is typed", async () => {
+    // The two modes are mutually exclusive; a stale date must never ride along with
+    // a preset, or the server would have to guess which the user meant.
     vi.stubGlobal("fetch", mockMixedLagFetch());
     render(<FundsPage />);
     await screen.findByDisplayValue("2026-09-04");
 
     fireEvent.click(screen.getByText("1D"));
-    await screen.findByDisplayValue("2026-09-03"); // start = global end - 1
+    expect(screen.queryByDisplayValue("2026-09-04")).toBeNull(); // dates cleared
 
-    fireEvent.change(screen.getByLabelText("Fund Manager") as HTMLSelectElement, {
-      target: { value: "JP Morgan" },
+    fireEvent.change(screen.getByLabelText("End Date") as HTMLInputElement, {
+      target: { value: "2026-09-03" },
     });
+    fireEvent.change(screen.getByLabelText("Start Date") as HTMLInputElement, {
+      target: { value: "2026-09-02" },
+    });
+    fireEvent.click(screen.getByText("Submit"));
 
-    // End -> 09-03 (JP's latest) and Start -> 09-02, so the two resolve to DIFFERENT
-    // snapshots. Leaving Start at 09-03 would collapse both onto one.
-    expect(await screen.findByDisplayValue("2026-09-02")).toBeTruthy();
-    expect(await screen.findByDisplayValue("2026-09-03")).toBeTruthy();
+    const url = new URLSearchParams(
+      (push.mock.calls.at(-1)![0] as string).split("?")[1],
+    );
+    expect(url.get("preset")).toBeNull();
+    expect(url.get("end")).toBe("2026-09-03");
+  });
+
+  it("forwards the preset to the table and filter-option fetches", async () => {
+    // `preset` used to be stripped before calling the API, because it had already
+    // been turned into dates. It now carries the resolution mode, so stripping it
+    // would silently produce a dateless request.
+    currentParams = new URLSearchParams({ manager: "Regan", preset: "1D" });
+    const fetchMock = mockMixedLagFetch();
+    vi.stubGlobal("fetch", fetchMock);
+    render(<FundsPage />);
+
+    await screen.findByText(/No position changes found/);
+    const called = fetchMock.mock.calls.map((c) => c[0] as string);
+    expect(called.some((u) => u.startsWith("/api/funds/changes") && u.includes("preset=1D"))).toBe(
+      true,
+    );
+    expect(
+      called.some((u) => u.startsWith("/api/funds/filter-options") && u.includes("preset=1D")),
+    ).toBe(true);
   });
 
   it("does not overwrite an End the URL explicitly carried", async () => {
