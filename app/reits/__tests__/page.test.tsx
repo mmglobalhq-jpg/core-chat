@@ -248,4 +248,84 @@ describe("REIT Research page", () => {
     // And offers to collapse back to the latest 12.
     expect(await screen.findByRole("button", { name: /show latest 12/i })).toBeInTheDocument();
   });
+
+  // ---- Export PDF ----------------------------------------------------------
+
+  it("disables Export PDF until a report is actually open", async () => {
+    vi.stubGlobal("fetch", mockFetch());
+    render(<ReitsPage />);
+    // Before a report loads there is nothing to export.
+    const btn = await screen.findByRole("button", { name: /export pdf/i });
+    expect(btn).toBeDisabled();
+    // Once the newest report opens, it becomes available.
+    await screen.findByText("Big Heading");
+    await waitFor(() => expect(btn).not.toBeDisabled());
+  });
+
+  it("downloads the open report from the export route, under a derived filename", async () => {
+    const pdfBlob = new Blob([new Uint8Array([0x25, 0x50, 0x44, 0x46])], {
+      type: "application/pdf",
+    });
+    const base = mockFetch();
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.endsWith("/pdf")) {
+        return { ok: true, status: 200, blob: async () => pdfBlob } as Response;
+      }
+      return base(url);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("URL", {
+      ...URL,
+      createObjectURL: vi.fn(() => "blob:fake"),
+      revokeObjectURL: vi.fn(),
+    });
+    const clicked: HTMLAnchorElement[] = [];
+    const realClick = HTMLAnchorElement.prototype.click;
+    HTMLAnchorElement.prototype.click = function () {
+      clicked.push(this as HTMLAnchorElement);
+    };
+    try {
+      render(<ReitsPage />);
+      await screen.findByText("Big Heading");
+      const btn = await screen.findByRole("button", { name: /export pdf/i });
+      await waitFor(() => expect(btn).not.toBeDisabled());
+      fireEvent.click(btn);
+      await waitFor(() => expect(clicked.length).toBe(1));
+      expect(clicked[0].download).toBe("arr-2026-05-31.pdf");
+      const called = fetchMock.mock.calls.map((c) => String(c[0]));
+      expect(called.some((u) => u === `/api/reits/reports/${encodeURIComponent(ARR_A)}/pdf`)).toBe(
+        true,
+      );
+    } finally {
+      HTMLAnchorElement.prototype.click = realClick;
+    }
+  });
+
+  it("surfaces an export failure instead of silently doing nothing", async () => {
+    const base = mockFetch();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.endsWith("/pdf")) {
+          return {
+            ok: false,
+            status: 502,
+            json: async () => ({ error: "REIT research data service error" }),
+          } as Response;
+        }
+        return base(url);
+      }),
+    );
+    render(<ReitsPage />);
+    await screen.findByText("Big Heading");
+    const btn = await screen.findByRole("button", { name: /export pdf/i });
+    await waitFor(() => expect(btn).not.toBeDisabled());
+    fireEvent.click(btn);
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/export failed/i);
+    expect(alert).toHaveTextContent(/REIT research data service error/i);
+    // And it can be dismissed rather than sticking for the rest of the session.
+    fireEvent.click(within(alert).getByRole("button", { name: /dismiss/i }));
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+  });
 });

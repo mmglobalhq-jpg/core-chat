@@ -3,7 +3,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft, RefreshCw } from "lucide-react";
+import { ArrowLeft, Download, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme/ThemeToggle";
 import { ReportMarkdown } from "@/components/reits/ReportMarkdown";
@@ -39,8 +39,16 @@ function fmtDate(d: string | null): string | null {
 
 class SessionExpired extends Error {}
 
-/** Fetch with the current Supabase bearer token; 401 -> SessionExpired. */
-async function authedFetch<T>(url: string, signal?: AbortSignal): Promise<T> {
+/**
+ * Fetch with the current Supabase bearer token, returning the RAW Response.
+ *
+ * Kept separate from `authedFetch` because the PDF export needs the body as a
+ * Blob, not JSON. Error handling stays here so every caller gets the same
+ * treatment: 401 -> SessionExpired, and a non-OK response surfaces the server's
+ * `error` field (the export route answers with JSON on failure even though it
+ * answers with binary on success).
+ */
+async function authedRequest(url: string, signal?: AbortSignal): Promise<Response> {
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token;
   const res = await fetch(url, {
@@ -59,7 +67,27 @@ async function authedFetch<T>(url: string, signal?: AbortSignal): Promise<T> {
     }
     throw new Error(msg);
   }
+  return res;
+}
+
+/** Fetch with the current Supabase bearer token; 401 -> SessionExpired. */
+async function authedFetch<T>(url: string, signal?: AbortSignal): Promise<T> {
+  const res = await authedRequest(url, signal);
   return (await res.json()) as T;
+}
+
+/**
+ * Filename for a downloaded report.
+ *
+ * The server sets `Content-Disposition`, which is authoritative; this only fills
+ * the `a.download` attribute so the name is right even if a browser ignores the
+ * header. Both sides derive it from the same fields, so they agree.
+ */
+function pdfFilename(r: ReportSummary): string {
+  const issuer = (r.issuerSymbol || "reit").toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const date = r.portfolioDate ?? r.publicationDate ?? "undated";
+  const version = r.version && r.version > 1 ? `-v${r.version}` : "";
+  return `${issuer}-${date}${version}.pdf`;
 }
 
 function ReitResearchPage() {
@@ -84,9 +112,49 @@ function ReitResearchPage() {
   const [reloadKey, setReloadKey] = useState(0);
   // Default view shows the latest 12 reports; the archive toggle loads the full history.
   const [archive, setArchive] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   const onSessionExpired = useCallback(() => setSessionExpired(true), []);
   const refreshAll = useCallback(() => setReloadKey((n) => n + 1), []);
+
+  /**
+   * Download the selected report as a PDF.
+   *
+   * The bytes come from the server (see the export route), so this only turns the
+   * response into a Blob and clicks a synthetic anchor — the same shape as the
+   * funds CSV export, so both downloads behave identically.
+   */
+  const exportPdf = useCallback(async () => {
+    if (!detail) return;
+    setExporting(true);
+    setExportError(null);
+    let url: string | null = null;
+    try {
+      const res = await authedRequest(`/api/reits/reports/${encodeURIComponent(detail.id)}/pdf`);
+      const blob = await res.blob();
+      url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = pdfFilename(detail);
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch (e) {
+      if (e instanceof SessionExpired) {
+        setSessionExpired(true);
+      } else {
+        setExportError(e instanceof Error ? e.message : "Export failed.");
+      }
+    } finally {
+      // Revoked on a delay, not immediately: some browsers have not finished
+      // reading the blob when click() returns, and revoking early yields an
+      // empty download.
+      const created = url;
+      if (created) setTimeout(() => URL.revokeObjectURL(created), 10_000);
+      setExporting(false);
+    }
+  }, [detail]);
 
   // Re-fetch when the user returns to a backgrounded tab (or refocuses the window), so a
   // long-open session reflects newly published report versions without a manual reload.
@@ -225,6 +293,18 @@ function ReitResearchPage() {
         <div className="ml-auto flex items-center gap-2">
           <Button
             type="button"
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            title={detail ? `Download ${pdfFilename(detail)}` : "Select a report to export"}
+            disabled={!detail || exporting || sessionExpired}
+            onClick={exportPdf}
+          >
+            <Download className="size-4" />
+            {exporting ? "Exporting…" : "Export PDF"}
+          </Button>
+          <Button
+            type="button"
             variant="ghost"
             size="icon"
             className="size-9"
@@ -238,6 +318,29 @@ function ReitResearchPage() {
           <ThemeToggle />
         </div>
       </header>
+
+      {/* Export failures surface here rather than inside the report panel: the
+          button lives in the header, and an error that appears far from the
+          control that caused it reads as unrelated. */}
+      {exportError ? (
+        <div
+          role="alert"
+          className="flex shrink-0 items-center gap-3 border-b border-border px-4 py-2 text-sm"
+        >
+          <span className="text-muted-foreground">
+            <span className="font-medium text-foreground">Export failed.</span> {exportError}
+          </span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="ml-auto"
+            onClick={() => setExportError(null)}
+          >
+            Dismiss
+          </Button>
+        </div>
+      ) : null}
 
       {sessionExpired ? (
         <SessionExpiredState />
