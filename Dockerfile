@@ -53,4 +53,14 @@ COPY --from=builder /app/node_modules ./node_modules
 EXPOSE 3000
 # Drop to the image's built-in non-root user.
 USER node
-CMD ["pnpm", "start"]
+# Invoke Next directly rather than through `pnpm start`. Two reasons, both learned
+# the hard way on 2026-09-14:
+#   * pnpm >= 10 verifies dependencies before running a script, and that verification
+#     wants to WRITE to /app/node_modules — which is root-owned here, while this
+#     process is `node`. The container crash-looped with ERR_PNPM_PACKAGE_MANAGER_
+#     REMOVE_MODULES_DIR on an image whose code had not changed.
+#   * `pnpm` is a corepack shim, so starting the container reached out to
+#     registry.npmjs.org to resolve a package manager. Container start must not
+#     depend on the network; this platform has already lost a day to a DNS outage.
+# `packageManager` in package.json now pins the build-time pnpm as well.
+CMD ["node_modules/.bin/next", "start"]

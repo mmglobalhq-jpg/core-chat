@@ -2,6 +2,8 @@
   "name": "core-chat",
   "version": "0.1.0",
   "private": true,
+  "//packageManager": "Pin it, or corepack resolves pnpm to LATEST at run time and the Dockerfile's `corepack prepare pnpm@… --activate` is ignored. On 2026-09-14 that downloaded pnpm 12.4.1 into a container built against 11.9.0; its verify-deps-before-run tried to rewrite the root-owned /app/node_modules as USER node and the container crash-looped. Nothing had changed in this repo — a host reboot would have done it.",
+  "packageManager": "pnpm@11.9.0",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
