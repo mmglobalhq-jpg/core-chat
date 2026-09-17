@@ -77,3 +77,28 @@ describe("parseSources", () => {
     ]);
   });
 });
+
+describe("a dropped connection", () => {
+  it("is retried once and then succeeds", async () => {
+    const { fetchWithOneRetry } = await import("@/lib/knowledgeApi");
+    const doFetch = vi
+      .fn()
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValueOnce(new Response("ok"));
+    const res = await fetchWithOneRetry(doFetch, undefined, 0);
+    expect(await res.text()).toBe("ok");
+    expect(doFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("explains itself if it fails twice, and never retries a Stop", async () => {
+    const { fetchWithOneRetry } = await import("@/lib/knowledgeApi");
+    const failing = vi.fn().mockRejectedValue(new TypeError("Failed to fetch"));
+    await expect(fetchWithOneRetry(failing, undefined, 0)).rejects.toThrow(/restarting/);
+
+    const controller = new AbortController();
+    controller.abort();
+    const aborted = vi.fn().mockRejectedValue(new DOMException("aborted", "AbortError"));
+    await expect(fetchWithOneRetry(aborted, controller.signal, 0)).rejects.toThrow();
+    expect(aborted).toHaveBeenCalledTimes(1);
+  });
+});

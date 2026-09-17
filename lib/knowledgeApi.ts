@@ -30,17 +30,16 @@ export async function sendKnowledgeChat(
   } = {},
   signal?: AbortSignal,
 ): Promise<KnowledgeResult> {
-  const res = await fetch("/api/kb/chat", {
-    method: "POST",
-    headers: await authHeaders(),
-    body: JSON.stringify({
-      text,
-      history,
-      chat_id: chatId,
-      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-    }),
-    signal,
+  const body = JSON.stringify({
+    text,
+    history,
+    chat_id: chatId,
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
   });
+  const res = await fetchWithOneRetry(
+    async () => fetch("/api/kb/chat", { method: "POST", headers: await authHeaders(), body, signal }),
+    signal,
+  );
 
   const contentType = res.headers.get("content-type") ?? "";
   if (!res.ok || !res.body || !contentType.includes("text/event-stream")) {
@@ -104,6 +103,33 @@ export async function sendKnowledgeChat(
     throw err;
   }
   return { reply, status, sources };
+}
+
+/**
+ * Retry once when the request never got a response (the browser's "Failed to fetch").
+ *
+ * Seen on 2026-09-17: a question sent while the web app was being redeployed failed
+ * outright, though the same question worked seconds later. Safe to repeat: a
+ * Knowledge-chat turn only reads, and nothing reaches the backend when the connection
+ * itself fails. An HTTP error response is NOT retried, and neither is a user's Stop.
+ */
+export async function fetchWithOneRetry(
+  doFetch: () => Promise<Response>,
+  signal?: AbortSignal,
+  delayMs = 1500,
+): Promise<Response> {
+  try {
+    return await doFetch();
+  } catch (err) {
+    if (signal?.aborted || (err instanceof DOMException && err.name === "AbortError")) throw err;
+    await new Promise((r) => setTimeout(r, delayMs));
+    try {
+      return await doFetch();
+    } catch (again) {
+      if (signal?.aborted) throw again;
+      throw new Error("the connection dropped twice — the app may be restarting. Try again in a moment.");
+    }
+  }
 }
 
 /** Keep only well-formed source entries (the stream is untrusted input to the UI). */
