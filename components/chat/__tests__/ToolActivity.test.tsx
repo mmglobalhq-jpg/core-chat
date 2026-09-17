@@ -10,7 +10,6 @@ describe("tool activity label", () => {
   });
 
   it("covers each tool family", () => {
-    expect(toolActivityLabel("query_knowledge_base")).toMatch(/knowledge base/i);
     expect(toolActivityLabel("list_calendar_events")).toMatch(/calendar/i);
     expect(toolActivityLabel("create_calendar_event")).toMatch(/Adding/i);
     expect(toolActivityLabel("search_flights")).toMatch(/flights/i);

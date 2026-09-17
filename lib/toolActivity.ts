@@ -16,8 +16,7 @@ const LABELS: [prefix: string, label: string][] = [
   ["search_flights", "Searching flights…"],
   ["search_web", "Searching the web…"],
   ["fetch_url", "Reading a page…"],
-  ["query_knowledge_base", "Searching your knowledge base…"],
-  // Knowledge chat's tools
+  // Knowledge chat's tools (the main chat's query_knowledge_base was removed 2026-09-17)
   ["search_knowledge", "Searching your knowledge base…"],
   ["read_document", "Reading a document…"],
   ["list_documents", "Checking your library…"],
