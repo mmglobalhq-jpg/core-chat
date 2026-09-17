@@ -111,7 +111,10 @@ function MessageBubbleImpl({
             // the line and makes long answers scroll noticeably further.
             isUser
               ? "max-w-[85%] items-end md:max-w-[80%]"
-              : "max-w-full items-start md:max-w-[80%]",
+              : // min-w-0 + flex-1: without them this column sized to its content and
+                // ignored the avatar beside it, so on a phone long answers (and Knowledge
+                // chat's source cards) ran past the right edge of the screen.
+                "min-w-0 max-w-full flex-1 items-start md:max-w-[80%] md:flex-initial",
           )}
         >
           {docs && docs.length > 0 && (
