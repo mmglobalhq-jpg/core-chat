@@ -16,7 +16,7 @@
  * 44pt targets, and the library's state lives in a store because the phone's Sheet
  * unmounts its children when it closes.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import type { Message as UIMessage } from "ai";
 import { Library, X } from "lucide-react";
 import { Sidebar } from "@/components/layout/Sidebar";
@@ -90,9 +90,6 @@ export default function KnowledgePage() {
   const [activity, setActivity] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
-  useEffect(() => {
-    setMobileOpen(false);
-  }, [activeConversationId]);
 
   const openLibrary = useCallback(() => {
     if (window.matchMedia("(min-width: 1024px)").matches) setLibraryOpen(true);
@@ -247,7 +244,8 @@ export default function KnowledgePage() {
         )}
       >
         <div className="pt-safe flex h-full w-96 flex-col">
-          <div className="flex h-14 shrink-0 items-center justify-between px-4">
+          {/* pr-14 keeps the close button clear of the fixed theme toggle (top-right). */}
+          <div className="flex h-14 shrink-0 items-center justify-between pl-4 pr-14">
             <h2 className="text-base font-medium">Documents</h2>
             <Button
               type="button"

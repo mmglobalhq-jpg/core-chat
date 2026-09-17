@@ -78,10 +78,6 @@ export default function Home() {
     abortRef.current?.abort();
   }, []);
 
-  // Close the mobile sidebar when switching conversations.
-  useEffect(() => {
-    setMobileOpen(false);
-  }, [activeConversationId]);
 
   // Doc chips: load the active chat's attached documents (grouped by message).
   const docsByMessage = useChatStore((s) => s.docsByMessage);

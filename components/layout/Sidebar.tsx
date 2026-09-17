@@ -137,7 +137,10 @@ function SidebarBody({
           type="button"
           variant="outline"
           className="flex-1 justify-start gap-2 bg-sidebar-accent/40"
-          onClick={newConversation}
+          onClick={() => {
+            newConversation();
+            onDismiss?.();
+          }}
         >
           <Plus className="size-4" />
           {kind === "knowledge" ? "New Knowledge Chat" : "New Chat"}
@@ -173,7 +176,13 @@ function SidebarBody({
                 <div key={conversation.id} className="group relative w-full min-w-0">
                   <button
                     type="button"
-                    onClick={() => selectConversation(conversation.id)}
+                    onClick={() => {
+                      selectConversation(conversation.id);
+                      // Close the phone drawer on the user's choice. (It used to close on
+                      // ANY active-conversation change, which includes history finishing
+                      // loading — so a menu opened in the first second snapped shut.)
+                      onDismiss?.();
+                    }}
                     className={cn(
                       "w-full truncate rounded-lg py-2 pl-2 pr-9 text-left text-sm transition-colors",
                       active

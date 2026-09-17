@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 
 let pathname = "/";
 const push = vi.fn();
@@ -112,5 +112,16 @@ describe("Sidebar chat switch", () => {
     const nav = screen.getByRole("navigation", { name: "Chats" });
     expect(within(nav).getByRole("link", { name: "Knowledge" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("button", { name: /New Knowledge Chat/ })).toBeInTheDocument();
+  });
+});
+
+describe("Sidebar phone drawer", () => {
+  it("closes when the user picks a conversation, not on its own", () => {
+    const onMobileOpenChange = vi.fn();
+    render(<Sidebar collapsed={false} onToggle={() => {}} mobileOpen onMobileOpenChange={onMobileOpenChange} />);
+    expect(onMobileOpenChange).not.toHaveBeenCalled();
+    const sheet = screen.getByRole("dialog");
+    fireEvent.click(within(sheet).getByRole("button", { name: "A main-chat conversation" }));
+    expect(onMobileOpenChange).toHaveBeenCalledWith(false);
   });
 });
