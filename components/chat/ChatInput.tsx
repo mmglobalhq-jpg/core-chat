@@ -43,9 +43,19 @@ interface ChatInputProps {
   onSend: (text: string, docs: PendingDoc[]) => void;
   isStreaming?: boolean;
   onStop?: () => void;
+  /** Show the attach-a-document control. Knowledge chat has none: documents are
+   *  added to the knowledge base from its library, not to a conversation. */
+  allowAttachments?: boolean;
+  placeholder?: string;
 }
 
-export function ChatInput({ onSend, isStreaming = false, onStop }: ChatInputProps) {
+export function ChatInput({
+  onSend,
+  isStreaming = false,
+  onStop,
+  allowAttachments = true,
+  placeholder = "Message your assistant…",
+}: ChatInputProps) {
   const [value, setValue] = useState("");
   const [pending, setPending] = useState<PendingDoc[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -188,7 +198,9 @@ export function ChatInput({ onSend, isStreaming = false, onStop }: ChatInputProp
             </div>
           )}
 
-          <div className="flex w-full items-end gap-2">
+          <div className={cn("flex w-full items-end gap-2", !allowAttachments && "pl-2")}>
+            {allowAttachments && (
+            <>
             <input
               ref={fileRef}
               type="file"
@@ -227,6 +239,8 @@ export function ChatInput({ onSend, isStreaming = false, onStop }: ChatInputProp
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
+            </>
+            )}
 
             <Textarea
               ref={textareaRef}
@@ -234,7 +248,7 @@ export function ChatInput({ onSend, isStreaming = false, onStop }: ChatInputProp
               onChange={(e) => setValue(e.target.value)}
               onKeyDown={handleKeyDown}
               rows={1}
-              placeholder={uploading ? "Processing document…" : "Message your assistant…"}
+              placeholder={uploading ? "Processing document…" : placeholder}
               aria-label="Message"
               className="max-h-[200px] min-h-9 flex-1 resize-none border-0 bg-transparent px-1 py-1.5 shadow-none focus-visible:ring-0 dark:bg-transparent"
             />

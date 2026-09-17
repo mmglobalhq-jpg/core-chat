@@ -14,9 +14,13 @@ import { MODEL_OPTIONS, modelLabel } from "@/lib/mock-data";
 interface HeaderProps {
   onMenuClick: () => void;
   onToggleSidebar: () => void;
+  /** Replaces the model selector with a fixed title (Knowledge chat has one model). */
+  title?: string;
+  /** Right-aligned controls, e.g. the Knowledge page's Library button. */
+  actions?: React.ReactNode;
 }
 
-export function Header({ onMenuClick, onToggleSidebar }: HeaderProps) {
+export function Header({ onMenuClick, onToggleSidebar, title, actions }: HeaderProps) {
   const selectedModelId = useChatStore((s) => s.selectedModelId);
   const setSelectedModel = useChatStore((s) => s.setSelectedModel);
 
@@ -46,7 +50,10 @@ export function Header({ onMenuClick, onToggleSidebar }: HeaderProps) {
         <PanelLeftOpen className="size-5" />
       </Button>
 
-      {/* Borderless, minimalist model selector at top-left (FR-009, FR-010). */}
+      {title ? (
+        <h1 className="px-2.5 text-base font-medium">{title}</h1>
+      ) : (
+      /* Borderless, minimalist model selector at top-left (FR-009, FR-010). */
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button
@@ -71,6 +78,9 @@ export function Header({ onMenuClick, onToggleSidebar }: HeaderProps) {
           ))}
         </DropdownMenuContent>
       </DropdownMenu>
+      )}
+      {/* mr-12 keeps actions clear of the fixed theme toggle in the top-right corner. */}
+      {actions && <div className="ml-auto mr-12 flex items-center gap-1">{actions}</div>}
     </header>
   );
 }

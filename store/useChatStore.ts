@@ -1,5 +1,12 @@
 import { create } from "zustand";
-import type { Conversation, DocumentRow, Message, ModelId } from "@/lib/types";
+import type {
+  ChatKind,
+  Conversation,
+  DocumentRow,
+  KnowledgeSource,
+  Message,
+  ModelId,
+} from "@/lib/types";
 import { DEFAULT_MODEL_ID, createId, isModelId } from "@/lib/mock-data";
 import {
   ensureChat,
@@ -38,6 +45,8 @@ interface ChatStore {
     conversationId: string,
     messageId: string,
     content: string,
+    /** Knowledge chat: the passages the answer cited, persisted with it. */
+    sources?: KnowledgeSource[],
   ) => void;
   /** Remove a chat from Recent (hides it in the DB; conversation data is kept). */
   hideConversation: (id: string) => void;
@@ -81,239 +90,253 @@ function blankConversation(): Conversation {
   };
 }
 
-// --- Supabase write plumbing (best-effort, never surfaced to the UI) --------
-// Per-conversation promise chains serialize writes so ensureChat() lands before
-// its first insertMessage() (FK order) and turns persist in submission order.
-const writeChains = new Map<string, Promise<void>>();
-// Conversations already known to have a `chats` row (fetched or ensured), so we
-// don't re-issue the idempotent upsert on every turn.
-const ensured = new Set<string>();
+// --- per-kind store factory ---------------------------------------------------
 
-function persistTurn(convId: string, title: string, message: Message) {
-  const prev = writeChains.get(convId) ?? Promise.resolve();
-  const next = prev
-    .then(async () => {
-      const uid = await getUserId(); // resolve the session once per turn, not per write
-      if (!uid) return;
-      if (!ensured.has(convId)) {
-        await ensureChat(uid, convId, title);
-        ensured.add(convId);
+export function createChatStore(kind: ChatKind) {
+  // --- Supabase write plumbing (best-effort, never surfaced to the UI) --------
+  // Per-conversation promise chains serialize writes so ensureChat() lands before
+  // its first insertMessage() (FK order) and turns persist in submission order.
+  const writeChains = new Map<string, Promise<void>>();
+  // Conversations already known to have a `chats` row (fetched or ensured), so we
+  // don't re-issue the idempotent upsert on every turn.
+  const ensured = new Set<string>();
+
+  function persistTurn(convId: string, title: string, message: Message) {
+    const prev = writeChains.get(convId) ?? Promise.resolve();
+    const next = prev
+      .then(async () => {
+        const uid = await getUserId(); // resolve the session once per turn, not per write
+        if (!uid) return;
+        if (!ensured.has(convId)) {
+          await ensureChat(uid, convId, title, kind);
+          ensured.add(convId);
+        }
+        await insertMessage(uid, convId, message);
+      })
+      .catch(() => {
+        // Best-effort persistence: a failed write must never break the live chat.
+        // Allow a later turn to retry ensureChat by clearing the flag.
+        ensured.delete(convId);
+      });
+    writeChains.set(convId, next);
+  }
+
+  const initialConversation = blankConversation();
+
+  return create<ChatStore>((set, get) => ({
+    selectedModelId: DEFAULT_MODEL_ID,
+
+    setSelectedModel: (id) => {
+      // Guard: only accept one of the fixed MODEL_OPTIONS ids.
+      if (!isModelId(id)) return;
+      set({ selectedModelId: id });
+    },
+
+    // Open on a fresh blank conversation; real history is loaded from Supabase by
+    // hydrateForUser() once the auth session is known (see useChatSync).
+    conversations: [initialConversation],
+    activeConversationId: initialConversation.id,
+
+    newConversation: () => {
+      const conversation = blankConversation();
+      set((state) => ({
+        conversations: [conversation, ...state.conversations],
+        activeConversationId: conversation.id,
+      }));
+    },
+
+    selectConversation: (id) => {
+      const conv = get().conversations.find((c) => c.id === id);
+      if (!conv) return; // ignore unknown ids (FR-008)
+      set({ activeConversationId: id });
+      // Lazily hydrate a persisted conversation's messages on first open. The
+      // `loaded` flip re-runs the feed effect in page.tsx (keyed on it).
+      if (conv.persisted && !conv.loaded) {
+        void loadMessages(id).then((loaded) => {
+          set((state) => ({
+            conversations: state.conversations.map((c) => {
+              if (c.id !== id) return c;
+              // Reconcile, don't clobber: if turns were appended while the DB load
+              // was in flight (user sent a message before it resolved), keep them
+              // AFTER the loaded history rather than overwriting them (C-1).
+              const messages =
+                c.messages.length > 0 ? [...loaded, ...c.messages] : loaded;
+              return { ...c, messages, loaded: true };
+            }),
+          }));
+        });
       }
-      await insertMessage(uid, convId, message);
-    })
-    .catch(() => {
-      // Best-effort persistence: a failed write must never break the live chat.
-      // Allow a later turn to retry ensureChat by clearing the flag.
-      ensured.delete(convId);
-    });
-  writeChains.set(convId, next);
+    },
+
+    appendMessage: (conversationId, message) => {
+      set((state) => ({
+        conversations: state.conversations.map((c) =>
+          c.id === conversationId
+            ? {
+                ...c,
+                messages: [...c.messages, message],
+                updatedAt: Date.now(),
+                // Optimistically show in history immediately; the row is written
+                // below (lazily created on the first user turn).
+                persisted: true,
+                title:
+                  c.title === "New chat" && message.role === "user"
+                    ? deriveTitle(message.content)
+                    : c.title,
+              }
+            : c,
+        ),
+      }));
+      // Persist this turn (best-effort, serialized per conversation).
+      const conv = get().conversations.find((c) => c.id === conversationId);
+      if (conv) persistTurn(conversationId, conv.title, message);
+    },
+
+    beginAssistantMessage: (conversationId, message) => {
+      // Placeholder for the streaming reply — added to the store (the single feed
+      // source) but NOT persisted; finalizeAssistantMessage persists once at the end.
+      set((state) => ({
+        conversations: state.conversations.map((c) =>
+          c.id === conversationId
+            ? { ...c, messages: [...c.messages, message], updatedAt: Date.now() }
+            : c,
+        ),
+      }));
+    },
+
+    patchMessageContent: (conversationId, messageId, content) => {
+      set((state) => ({
+        conversations: state.conversations.map((c) =>
+          c.id === conversationId
+            ? {
+                ...c,
+                messages: c.messages.map((m) =>
+                  m.id === messageId ? { ...m, content } : m,
+                ),
+              }
+            : c,
+        ),
+      }));
+    },
+
+    finalizeAssistantMessage: (conversationId, messageId, content, sources) => {
+      set((state) => ({
+        conversations: state.conversations.map((c) =>
+          c.id === conversationId
+            ? {
+                ...c,
+                messages: c.messages.map((m) =>
+                  m.id === messageId ? { ...m, content, ...(sources ? { sources } : {}) } : m,
+                ),
+                updatedAt: Date.now(),
+                persisted: true,
+              }
+            : c,
+        ),
+      }));
+      const conv = get().conversations.find((c) => c.id === conversationId);
+      const msg = conv?.messages.find((m) => m.id === messageId);
+      if (conv && msg) persistTurn(conversationId, conv.title, msg);
+    },
+
+    setConversationTitle: (id, title) => {
+      set((state) => ({
+        conversations: state.conversations.map((c) =>
+          c.id === id ? { ...c, title, titled: true } : c,
+        ),
+      }));
+      void renameChat(id, title); // best-effort persist (RLS-scoped)
+    },
+
+    hideConversation: (id) => {
+      void hideChat(id); // best-effort; row + messages are kept in the DB. RLS-scoped.
+      ensured.delete(id);
+      writeChains.delete(id);
+      set((state) => {
+        const remaining = state.conversations.filter((c) => c.id !== id);
+        if (state.activeConversationId !== id) {
+          return {
+            conversations: remaining,
+            activeConversationId: state.activeConversationId,
+          };
+        }
+        // Hiding the active chat: fall back to a fresh blank one.
+        const blank = blankConversation();
+        return { conversations: [blank, ...remaining], activeConversationId: blank.id };
+      });
+    },
+
+    hydrateForUser: async () => {
+      const chats = await listChats(kind); // [] when signed out
+      const fetched: Conversation[] = chats.map((c) => ({
+        id: c.id,
+        title: c.title,
+        messages: [],
+        updatedAt: Date.parse(c.updated_at) || 0,
+        persisted: true,
+        loaded: false,
+      }));
+      fetched.forEach((c) => ensured.add(c.id)); // rows already exist
+      set((state) => {
+        // Preserve an in-progress conversation (already has messages) across a
+        // hydrate; otherwise start fresh on a blank one.
+        const current = state.conversations.find(
+          (c) => c.id === state.activeConversationId,
+        );
+        const keepCurrent = !!current && current.messages.length > 0;
+        const head = keepCurrent ? current! : blankConversation();
+        const rest = keepCurrent
+          ? fetched.filter((c) => c.id !== current!.id)
+          : fetched;
+        return { conversations: [head, ...rest], activeConversationId: head.id };
+      });
+    },
+
+    docsByMessage: {},
+
+    ensureChatPersisted: async (id) => {
+      if (ensured.has(id)) return;
+      const uid = await getUserId();
+      if (!uid) return;
+      const conv = get().conversations.find((c) => c.id === id);
+      await ensureChat(uid, id, conv?.title ?? "New chat", kind);
+      ensured.add(id);
+    },
+
+    setChatDocuments: (docs) => {
+      const byMsg: Record<string, DocumentRow[]> = {};
+      for (const d of docs) {
+        if (!d.message_id) continue;
+        (byMsg[d.message_id] ??= []).push(d);
+      }
+      set({ docsByMessage: byMsg });
+    },
+
+    addMessageDocuments: (messageId, docs) => {
+      set((state) => ({
+        docsByMessage: {
+          ...state.docsByMessage,
+          [messageId]: [...(state.docsByMessage[messageId] ?? []), ...docs],
+        },
+      }));
+    },
+
+    activeConversation: () => {
+      const { conversations, activeConversationId } = get();
+      return conversations.find((c) => c.id === activeConversationId) ?? null;
+    },
+  }));
 }
 
-const initialConversation = blankConversation();
+/**
+ * One store per chat kind. Main chat and Knowledge chat each keep their own
+ * conversation list, active conversation and write queues, and each only ever
+ * lists and creates chats of its own kind (chats.kind, migration 0013).
+ */
+export const useChatStore = createChatStore("main");
+export const useKnowledgeChatStore = createChatStore("knowledge");
 
-export const useChatStore = create<ChatStore>((set, get) => ({
-  selectedModelId: DEFAULT_MODEL_ID,
-
-  setSelectedModel: (id) => {
-    // Guard: only accept one of the fixed MODEL_OPTIONS ids.
-    if (!isModelId(id)) return;
-    set({ selectedModelId: id });
-  },
-
-  // Open on a fresh blank conversation; real history is loaded from Supabase by
-  // hydrateForUser() once the auth session is known (see useChatSync).
-  conversations: [initialConversation],
-  activeConversationId: initialConversation.id,
-
-  newConversation: () => {
-    const conversation = blankConversation();
-    set((state) => ({
-      conversations: [conversation, ...state.conversations],
-      activeConversationId: conversation.id,
-    }));
-  },
-
-  selectConversation: (id) => {
-    const conv = get().conversations.find((c) => c.id === id);
-    if (!conv) return; // ignore unknown ids (FR-008)
-    set({ activeConversationId: id });
-    // Lazily hydrate a persisted conversation's messages on first open. The
-    // `loaded` flip re-runs the feed effect in page.tsx (keyed on it).
-    if (conv.persisted && !conv.loaded) {
-      void loadMessages(id).then((loaded) => {
-        set((state) => ({
-          conversations: state.conversations.map((c) => {
-            if (c.id !== id) return c;
-            // Reconcile, don't clobber: if turns were appended while the DB load
-            // was in flight (user sent a message before it resolved), keep them
-            // AFTER the loaded history rather than overwriting them (C-1).
-            const messages =
-              c.messages.length > 0 ? [...loaded, ...c.messages] : loaded;
-            return { ...c, messages, loaded: true };
-          }),
-        }));
-      });
-    }
-  },
-
-  appendMessage: (conversationId, message) => {
-    set((state) => ({
-      conversations: state.conversations.map((c) =>
-        c.id === conversationId
-          ? {
-              ...c,
-              messages: [...c.messages, message],
-              updatedAt: Date.now(),
-              // Optimistically show in history immediately; the row is written
-              // below (lazily created on the first user turn).
-              persisted: true,
-              title:
-                c.title === "New chat" && message.role === "user"
-                  ? deriveTitle(message.content)
-                  : c.title,
-            }
-          : c,
-      ),
-    }));
-    // Persist this turn (best-effort, serialized per conversation).
-    const conv = get().conversations.find((c) => c.id === conversationId);
-    if (conv) persistTurn(conversationId, conv.title, message);
-  },
-
-  beginAssistantMessage: (conversationId, message) => {
-    // Placeholder for the streaming reply — added to the store (the single feed
-    // source) but NOT persisted; finalizeAssistantMessage persists once at the end.
-    set((state) => ({
-      conversations: state.conversations.map((c) =>
-        c.id === conversationId
-          ? { ...c, messages: [...c.messages, message], updatedAt: Date.now() }
-          : c,
-      ),
-    }));
-  },
-
-  patchMessageContent: (conversationId, messageId, content) => {
-    set((state) => ({
-      conversations: state.conversations.map((c) =>
-        c.id === conversationId
-          ? {
-              ...c,
-              messages: c.messages.map((m) =>
-                m.id === messageId ? { ...m, content } : m,
-              ),
-            }
-          : c,
-      ),
-    }));
-  },
-
-  finalizeAssistantMessage: (conversationId, messageId, content) => {
-    set((state) => ({
-      conversations: state.conversations.map((c) =>
-        c.id === conversationId
-          ? {
-              ...c,
-              messages: c.messages.map((m) =>
-                m.id === messageId ? { ...m, content } : m,
-              ),
-              updatedAt: Date.now(),
-              persisted: true,
-            }
-          : c,
-      ),
-    }));
-    const conv = get().conversations.find((c) => c.id === conversationId);
-    const msg = conv?.messages.find((m) => m.id === messageId);
-    if (conv && msg) persistTurn(conversationId, conv.title, msg);
-  },
-
-  setConversationTitle: (id, title) => {
-    set((state) => ({
-      conversations: state.conversations.map((c) =>
-        c.id === id ? { ...c, title, titled: true } : c,
-      ),
-    }));
-    void renameChat(id, title); // best-effort persist (RLS-scoped)
-  },
-
-  hideConversation: (id) => {
-    void hideChat(id); // best-effort; row + messages are kept in the DB. RLS-scoped.
-    ensured.delete(id);
-    writeChains.delete(id);
-    set((state) => {
-      const remaining = state.conversations.filter((c) => c.id !== id);
-      if (state.activeConversationId !== id) {
-        return {
-          conversations: remaining,
-          activeConversationId: state.activeConversationId,
-        };
-      }
-      // Hiding the active chat: fall back to a fresh blank one.
-      const blank = blankConversation();
-      return { conversations: [blank, ...remaining], activeConversationId: blank.id };
-    });
-  },
-
-  hydrateForUser: async () => {
-    const chats = await listChats(); // [] when signed out
-    const fetched: Conversation[] = chats.map((c) => ({
-      id: c.id,
-      title: c.title,
-      messages: [],
-      updatedAt: Date.parse(c.updated_at) || 0,
-      persisted: true,
-      loaded: false,
-    }));
-    fetched.forEach((c) => ensured.add(c.id)); // rows already exist
-    set((state) => {
-      // Preserve an in-progress conversation (already has messages) across a
-      // hydrate; otherwise start fresh on a blank one.
-      const current = state.conversations.find(
-        (c) => c.id === state.activeConversationId,
-      );
-      const keepCurrent = !!current && current.messages.length > 0;
-      const head = keepCurrent ? current! : blankConversation();
-      const rest = keepCurrent
-        ? fetched.filter((c) => c.id !== current!.id)
-        : fetched;
-      return { conversations: [head, ...rest], activeConversationId: head.id };
-    });
-  },
-
-  docsByMessage: {},
-
-  ensureChatPersisted: async (id) => {
-    if (ensured.has(id)) return;
-    const uid = await getUserId();
-    if (!uid) return;
-    const conv = get().conversations.find((c) => c.id === id);
-    await ensureChat(uid, id, conv?.title ?? "New chat");
-    ensured.add(id);
-  },
-
-  setChatDocuments: (docs) => {
-    const byMsg: Record<string, DocumentRow[]> = {};
-    for (const d of docs) {
-      if (!d.message_id) continue;
-      (byMsg[d.message_id] ??= []).push(d);
-    }
-    set({ docsByMessage: byMsg });
-  },
-
-  addMessageDocuments: (messageId, docs) => {
-    set((state) => ({
-      docsByMessage: {
-        ...state.docsByMessage,
-        [messageId]: [...(state.docsByMessage[messageId] ?? []), ...docs],
-      },
-    }));
-  },
-
-  activeConversation: () => {
-    const { conversations, activeConversationId } = get();
-    return conversations.find((c) => c.id === activeConversationId) ?? null;
-  },
-}));
+export type ChatStoreHook = typeof useChatStore;
 
 // Development-only debug handle (stripped from production builds). Lets tooling
 // inspect store state (e.g. attached intent payloads) at runtime.

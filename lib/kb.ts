@@ -31,6 +31,8 @@ export async function ingestFile(
   file: File,
   scope: KbScope,
   onStage: (stage: string) => void,
+  /** Replace this document: it is removed only after the new file finishes ingesting. */
+  replacesDocumentId?: string,
 ): Promise<{ ok: boolean; error?: string; pending?: boolean }> {
   const docId = crypto.randomUUID();
 
@@ -42,7 +44,13 @@ export async function ingestFile(
   const res = await fetch("/api/kb/ingest", {
     method: "POST",
     headers: await authHeaders(),
-    body: JSON.stringify({ doc_id: docId, filename: file.name, content_type: file.type || null, scope }),
+    body: JSON.stringify({
+      doc_id: docId,
+      filename: file.name,
+      content_type: file.type || null,
+      scope,
+      ...(replacesDocumentId ? { replaces_document_id: replacesDocumentId } : {}),
+    }),
   });
   if (!res.ok) {
     const d = await res.json().catch(() => ({}));

@@ -6,8 +6,9 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { LoadingIndicator } from "@/components/chat/LoadingIndicator";
 import { DocChip } from "@/components/chat/DocChip";
+import { SourceList } from "@/components/chat/SourceList";
 import { MessageMarkdown } from "@/components/markdown/MessageMarkdown";
-import type { DocumentRow } from "@/lib/types";
+import type { DocumentRow, KnowledgeSource } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 interface MessageBubbleProps {
@@ -21,6 +22,8 @@ interface MessageBubbleProps {
    *  this bubble is still waiting for its first token. Once text arrives the reply
    *  itself is the status and the label would be noise. */
   activity?: string | null;
+  /** Knowledge chat: the passages this answer cited (shown under it). */
+  sources?: KnowledgeSource[];
 }
 
 // Memoized: during streaming the parent re-renders on every token flush, but only
@@ -34,6 +37,7 @@ function MessageBubbleImpl({
   docs,
   loading = false,
   activity = null,
+  sources,
 }: MessageBubbleProps) {
   const isUser = role === "user";
   const [copied, setCopied] = useState(false);
@@ -140,6 +144,7 @@ function MessageBubbleImpl({
               {isUser ? content : <MessageMarkdown content={content} streaming={loading} />}
             </div>
           )}
+          {!isUser && !loading && sources && sources.length > 0 && <SourceList sources={sources} />}
         </div>
       )}
 

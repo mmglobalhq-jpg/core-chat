@@ -17,6 +17,10 @@ const LABELS: [prefix: string, label: string][] = [
   ["search_web", "Searching the web…"],
   ["fetch_url", "Reading a page…"],
   ["query_knowledge_base", "Searching your knowledge base…"],
+  // Knowledge chat's tools
+  ["search_knowledge", "Searching your knowledge base…"],
+  ["read_document", "Reading a document…"],
+  ["list_documents", "Checking your library…"],
   ["list_calendar", "Checking your calendar…"],
   ["create_calendar", "Adding to your calendar…"],
   ["update_calendar", "Updating your calendar…"],

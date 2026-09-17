@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -8,6 +7,7 @@ import {
   BookOpen,
   Building2,
   LogOut,
+  MessageSquare,
   NotebookPen,
   PanelLeftClose,
   Plus,
@@ -22,12 +22,14 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { SettingsMenu } from "@/components/settings/SettingsMenu";
-import { KnowledgeBaseModal } from "@/components/kb/KnowledgeBaseModal";
 import { supabase } from "@/lib/supabaseClient";
-import { useChatStore } from "@/store/useChatStore";
+import { useChatStore, useKnowledgeChatStore } from "@/store/useChatStore";
+import type { ChatKind } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 interface SidebarProps {
+  /** Which chat's history this sidebar lists. Main chat by default. */
+  kind?: ChatKind;
   collapsed: boolean;
   onToggle: () => void;
   mobileOpen: boolean;
@@ -35,6 +37,7 @@ interface SidebarProps {
 }
 
 export function Sidebar({
+  kind = "main",
   collapsed,
   onToggle,
   mobileOpen,
@@ -51,7 +54,7 @@ export function Sidebar({
         aria-hidden={collapsed}
       >
         <div className="flex h-full w-72 flex-col">
-          <SidebarBody onToggle={onToggle} showCollapse />
+          <SidebarBody kind={kind} onToggle={onToggle} showCollapse />
         </div>
       </aside>
 
@@ -66,6 +69,7 @@ export function Sidebar({
           </SheetHeader>
           <div className="flex h-full flex-col">
             <SidebarBody
+              kind={kind}
               onToggle={onToggle}
               showCollapse={false}
               onDismiss={() => onMobileOpenChange(false)}
@@ -78,24 +82,27 @@ export function Sidebar({
 }
 
 function SidebarBody({
+  kind,
   onDismiss,
   onToggle,
   showCollapse,
 }: {
+  kind: ChatKind;
   onToggle: () => void;
   showCollapse: boolean;
 
   /** Close the mobile drawer. Undefined on desktop, where there is none. */
   onDismiss?: () => void;
 }) {
-  const conversations = useChatStore((s) => s.conversations);
-  const activeConversationId = useChatStore((s) => s.activeConversationId);
-  const newConversation = useChatStore((s) => s.newConversation);
-  const selectConversation = useChatStore((s) => s.selectConversation);
-  const hideConversation = useChatStore((s) => s.hideConversation);
+  // `kind` is fixed for the life of a page, so the hook choice is stable.
+  const useStore = kind === "knowledge" ? useKnowledgeChatStore : useChatStore;
+  const conversations = useStore((s) => s.conversations);
+  const activeConversationId = useStore((s) => s.activeConversationId);
+  const newConversation = useStore((s) => s.newConversation);
+  const selectConversation = useStore((s) => s.selectConversation);
+  const hideConversation = useStore((s) => s.hideConversation);
   const router = useRouter();
   const pathname = usePathname();
-  const [kbOpen, setKbOpen] = useState(false);
 
   async function handleSignOut() {
     await supabase.auth.signOut();
@@ -111,6 +118,19 @@ function SidebarBody({
 
   return (
     <div className="flex h-full flex-col bg-sidebar text-sidebar-foreground">
+      {/* Chat switch: the main assistant and Knowledge chat are separate pages with
+          separate histories. Links, so the URL is the state and Back works. */}
+      <nav aria-label="Chats" className="px-3 pt-3">
+        <div className="grid grid-cols-2 gap-1 rounded-xl bg-sidebar-accent/50 p-1">
+          <ChatSwitchLink href="/" active={kind === "main"} icon={<MessageSquare className="size-4" />}>
+            Chat
+          </ChatSwitchLink>
+          <ChatSwitchLink href="/knowledge" active={kind === "knowledge"} icon={<BookOpen className="size-4" />}>
+            Knowledge
+          </ChatSwitchLink>
+        </div>
+      </nav>
+
       {/* Top: New Chat pinned (FR-004). */}
       <div className="flex items-center gap-2 p-3">
         <Button
@@ -120,7 +140,7 @@ function SidebarBody({
           onClick={newConversation}
         >
           <Plus className="size-4" />
-          New Chat
+          {kind === "knowledge" ? "New Knowledge Chat" : "New Chat"}
         </Button>
         {showCollapse && (
           <Button
@@ -196,15 +216,6 @@ function SidebarBody({
       <div className="mt-auto border-t border-sidebar-border p-2">
         <p className="px-2 py-1 text-xs font-medium text-muted-foreground">Apps</p>
         <Button
-          type="button"
-          variant="ghost"
-          className="w-full justify-start gap-2 text-sidebar-foreground"
-          onClick={() => setKbOpen(true)}
-        >
-          <BookOpen className="size-4" />
-          <span className="text-sm">Knowledge Base</span>
-        </Button>
-        <Button
           asChild
           variant="ghost"
           className="w-full justify-start gap-2 text-sidebar-foreground"
@@ -242,8 +253,6 @@ function SidebarBody({
         </Button>
       </div>
 
-      <KnowledgeBaseModal open={kbOpen} onClose={() => setKbOpen(false)} />
-
       {/* Bottom: Settings (opens a bottom-left popup menu) + Sign out. */}
       <div className="border-t border-sidebar-border p-2">
         <SettingsMenu onOpenSection={onDismiss} />
@@ -258,5 +267,35 @@ function SidebarBody({
         </Button>
       </div>
     </div>
+  );
+}
+
+function ChatSwitchLink({
+  href,
+  active,
+  icon,
+  children,
+}: {
+  href: string;
+  active: boolean;
+  icon: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <Link
+      href={href}
+      aria-current={active ? "page" : undefined}
+      className={cn(
+        // min-h-11 on touch: the switch is the only way between the two chats.
+        "flex min-h-11 items-center justify-center gap-1.5 rounded-lg px-2 text-sm transition-colors md:min-h-9",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        active
+          ? "bg-sidebar text-sidebar-foreground font-medium shadow-sm"
+          : "text-muted-foreground hover:text-sidebar-foreground",
+      )}
+    >
+      {icon}
+      {children}
+    </Link>
   );
 }

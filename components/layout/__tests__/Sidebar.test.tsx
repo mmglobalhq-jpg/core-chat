@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 
 let pathname = "/";
 const push = vi.fn();
@@ -12,25 +12,25 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/lib/supabaseClient", () => ({
   supabase: { auth: { signOut: async () => ({}) } },
 }));
+const storeState = (title: string) => ({
+  conversations: [{ id: title, title, messages: [], updatedAt: 1, persisted: true }],
+  activeConversationId: null,
+  newConversation: () => {},
+  selectConversation: () => {},
+  hideConversation: () => {},
+});
 vi.mock("@/store/useChatStore", () => ({
-  useChatStore: (sel: (s: unknown) => unknown) =>
-    sel({
-      conversations: [],
-      activeConversationId: null,
-      newConversation: () => {},
-      selectConversation: () => {},
-      hideConversation: () => {},
-    }),
+  useChatStore: (sel: (s: unknown) => unknown) => sel(storeState("A main-chat conversation")),
+  useKnowledgeChatStore: (sel: (s: unknown) => unknown) => sel(storeState("A knowledge conversation")),
 }));
 // Keep the test focused on the sidebar's own markup.
 vi.mock("@/components/settings/SettingsMenu", () => ({ SettingsMenu: () => null }));
-vi.mock("@/components/kb/KnowledgeBaseModal", () => ({ KnowledgeBaseModal: () => null }));
 
 import { Sidebar } from "@/components/layout/Sidebar";
 
-function renderSidebar() {
+function renderSidebar(kind?: "main" | "knowledge") {
   return render(
-    <Sidebar collapsed={false} onToggle={() => {}} mobileOpen={false} onMobileOpenChange={() => {}} />,
+    <Sidebar kind={kind} collapsed={false} onToggle={() => {}} mobileOpen={false} onMobileOpenChange={() => {}} />,
   );
 }
 
@@ -65,7 +65,8 @@ describe("Sidebar Apps section", () => {
     // The entries Notes was added alongside are all still present.
     expect(screen.getByRole("link", { name: "Funds" })).toHaveAttribute("href", "/funds");
     expect(screen.getByRole("link", { name: "REIT" })).toHaveAttribute("href", "/reits");
-    expect(screen.getByRole("button", { name: "Knowledge Base" })).toBeInTheDocument();
+    // The Knowledge Base popup button is gone: the library lives on /knowledge now.
+    expect(screen.queryByRole("button", { name: "Knowledge Base" })).not.toBeInTheDocument();
   });
 
   it("marks the Notes entry active only when on /notes", () => {
@@ -84,5 +85,32 @@ describe("Sidebar Apps section", () => {
       "aria-current",
       "page",
     );
+  });
+});
+
+describe("Sidebar chat switch", () => {
+  it("links Chat to / and Knowledge to /knowledge, marking the current one", () => {
+    renderSidebar();
+    const nav = screen.getByRole("navigation", { name: "Chats" });
+    const chat = within(nav).getByRole("link", { name: "Chat" });
+    const knowledge = within(nav).getByRole("link", { name: "Knowledge" });
+    expect(chat).toHaveAttribute("href", "/");
+    expect(knowledge).toHaveAttribute("href", "/knowledge");
+    expect(chat).toHaveAttribute("aria-current", "page");
+    expect(knowledge).not.toHaveAttribute("aria-current");
+  });
+
+  it("lists only the history of the chat it belongs to", () => {
+    const { unmount } = renderSidebar("main");
+    expect(screen.getByText("A main-chat conversation")).toBeInTheDocument();
+    expect(screen.queryByText("A knowledge conversation")).not.toBeInTheDocument();
+    unmount();
+
+    renderSidebar("knowledge");
+    expect(screen.getByText("A knowledge conversation")).toBeInTheDocument();
+    expect(screen.queryByText("A main-chat conversation")).not.toBeInTheDocument();
+    const nav = screen.getByRole("navigation", { name: "Chats" });
+    expect(within(nav).getByRole("link", { name: "Knowledge" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("button", { name: /New Knowledge Chat/ })).toBeInTheDocument();
   });
 });

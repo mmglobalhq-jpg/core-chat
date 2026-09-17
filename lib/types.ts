@@ -1,5 +1,20 @@
 export type Role = "user" | "assistant";
 
+/** Which chat a conversation belongs to: the main assistant or Knowledge chat. */
+export type ChatKind = "main" | "knowledge";
+
+/**
+ * A passage a Knowledge-chat answer cited. `n` is the citation number in the answer
+ * text ([n]); the excerpt lets the reader check the claim without leaving the chat.
+ */
+export interface KnowledgeSource {
+  n: number;
+  document_id: string | null;
+  title: string;
+  chunk_index: number | null;
+  excerpt: string;
+}
+
 export type ModelId = "gemini-2.5-flash" | "deepseek-v4-pro" | "gpt-5.5";
 
 export interface ModelOption {
@@ -12,6 +27,8 @@ export interface Message {
   role: Role;
   content: string;
   createdAt: number;
+  /** Knowledge chat only: the passages this assistant answer cited. */
+  sources?: KnowledgeSource[];
 }
 
 export interface Conversation {

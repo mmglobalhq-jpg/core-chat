@@ -5,7 +5,7 @@ import type { Message as UIMessage } from "ai";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { MessageBubble } from "@/components/chat/MessageBubble";
-import type { DocumentRow } from "@/lib/types";
+import type { DocumentRow, KnowledgeSource } from "@/lib/types";
 
 interface ChatFeedProps {
   messages: UIMessage[];
@@ -15,6 +15,10 @@ interface ChatFeedProps {
   isStreaming?: boolean;
   /** Attached documents keyed by message id (rendered as chips on that message). */
   docsByMessage?: Record<string, DocumentRow[]>;
+  /** Knowledge chat: cited passages keyed by assistant message id. */
+  sourcesByMessage?: Record<string, KnowledgeSource[]>;
+  /** What an empty conversation shows. Defaults to the main assistant's greeting. */
+  emptyState?: React.ReactNode;
 }
 
 // Windowed rendering: only the most recent WINDOW messages are kept in the DOM;
@@ -29,7 +33,9 @@ export function ChatFeed({
   messages,
   isStreaming = false,
   docsByMessage = {},
+  sourcesByMessage,
   activity = null,
+  emptyState,
 }: ChatFeedProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const [visibleCount, setVisibleCount] = useState(WINDOW);
@@ -56,7 +62,9 @@ export function ChatFeed({
   return (
     <ScrollArea className="overscroll-none-mobile h-full w-full">
       <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col px-4 pt-4 pb-[calc(11rem+env(safe-area-inset-bottom))] md:pt-6 md:pb-44">
-        {isEmpty ? (
+        {isEmpty && emptyState ? (
+          emptyState
+        ) : isEmpty ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-2 py-24 text-center">
             <h1 className="text-2xl font-semibold text-foreground">
               How can I help you today?
@@ -87,6 +95,7 @@ export function ChatFeed({
                   role={message.role}
                   content={message.content}
                   docs={docsByMessage[message.id]}
+                  sources={sourcesByMessage?.[message.id]}
                   loading={
                     isStreaming &&
                     index === shown.length - 1 &&

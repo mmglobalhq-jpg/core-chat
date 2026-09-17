@@ -12,7 +12,7 @@
  * unit tests never touch the network.
  */
 import { supabase } from "@/lib/supabaseClient";
-import type { ChatRow, Message, Role } from "@/lib/types";
+import type { ChatKind, ChatRow, KnowledgeSource, Message, Role } from "@/lib/types";
 
 /** The signed-in user's id, or null. Exported so callers that make several writes
  *  in a row (e.g. the store's persistTurn) can resolve it once and thread it in. */
@@ -23,13 +23,15 @@ export async function getUserId(): Promise<string | null> {
   return session?.user?.id ?? null;
 }
 
-/** All of the signed-in user's chats, most-recently-updated first (metadata only). */
-export async function listChats(): Promise<ChatRow[]> {
+/** The signed-in user's chats of one kind, most-recently-updated first (metadata only).
+ *  Main chat and Knowledge chat keep separate histories (migration 0013). */
+export async function listChats(kind: ChatKind = "main"): Promise<ChatRow[]> {
   const uid = await getUserId();
   if (!uid) return [];
   const { data, error } = await supabase
     .from("chats")
     .select("id, title, created_at, updated_at")
+    .eq("kind", kind)
     .eq("hidden", false) // hidden chats are removed from Recent but kept in the DB
     .order("updated_at", { ascending: false });
   if (error || !data) return [];
@@ -42,16 +44,20 @@ export async function loadMessages(chatId: string): Promise<Message[]> {
   if (!uid) return [];
   const { data, error } = await supabase
     .from("messages")
-    .select("id, role, content, created_at")
+    .select("id, role, content, intent, created_at")
     .eq("chat_id", chatId)
     .order("created_at", { ascending: true });
   if (error || !data) return [];
-  return data.map((row) => ({
-    id: row.id as string,
-    role: row.role as Role,
-    content: (row.content as string) ?? "",
-    createdAt: Date.parse(row.created_at as string) || 0,
-  }));
+  return data.map((row) => {
+    const sources = (row.intent as { sources?: KnowledgeSource[] } | null)?.sources;
+    return {
+      id: row.id as string,
+      role: row.role as Role,
+      content: (row.content as string) ?? "",
+      createdAt: Date.parse(row.created_at as string) || 0,
+      ...(Array.isArray(sources) ? { sources } : {}),
+    };
+  });
 }
 
 /**
@@ -65,11 +71,12 @@ export async function ensureChat(
   uid: string,
   id: string,
   title: string,
+  kind: ChatKind = "main",
 ): Promise<void> {
   await supabase
     .from("chats")
     .upsert(
-      { id, user_id: uid, title },
+      { id, user_id: uid, title, kind },
       { onConflict: "id", ignoreDuplicates: true },
     );
 }
@@ -86,6 +93,8 @@ export async function insertMessage(
     chat_id: chatId,
     role: message.role,
     content: message.content,
+    // Knowledge chat: keep the cited passages with the answer (messages.intent jsonb).
+    ...(message.sources ? { intent: { sources: message.sources } } : {}),
   });
   await supabase
     .from("chats")

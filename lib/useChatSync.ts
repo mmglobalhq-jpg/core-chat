@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { supabase } from "@/lib/supabaseClient";
-import { useChatStore } from "@/store/useChatStore";
+import { useChatStore, type ChatStoreHook } from "@/store/useChatStore";
 
 /**
  * Keeps the chat store's history in sync with the signed-in user. Hydrates once
@@ -11,8 +11,8 @@ import { useChatStore } from "@/store/useChatStore";
  * otherwise wipe an in-progress conversation. Mirrors the auth-subscription
  * pattern in useIsAdmin / useProfile.
  */
-export function useChatSync(): void {
-  const hydrate = useChatStore((s) => s.hydrateForUser);
+export function useChatSync(store: ChatStoreHook = useChatStore): void {
+  const hydrate = store((s) => s.hydrateForUser);
 
   useEffect(() => {
     let mounted = true;
