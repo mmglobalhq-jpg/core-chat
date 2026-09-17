@@ -16,7 +16,7 @@
  * 44pt targets, and the library's state lives in a store because the phone's Sheet
  * unmounts its children when it closes.
  */
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Message as UIMessage } from "ai";
 import { Library, X } from "lucide-react";
 import { Sidebar } from "@/components/layout/Sidebar";
@@ -86,20 +86,30 @@ export default function KnowledgePage() {
   // Library: a side panel on desktop (open by default), a sheet on phones.
   const [libraryOpen, setLibraryOpen] = useState(true);
   const [librarySheetOpen, setLibrarySheetOpen] = useState(false);
+  // Which library container is in use. Only that one mounts the library: the desktop
+  // panel is merely hidden by CSS on a phone, and mounting both loaded every list twice.
+  const [isDesktop, setIsDesktop] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 1024px)");
+    const sync = () => setIsDesktop(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
   const [isStreaming, setIsStreaming] = useState(false);
   const [activity, setActivity] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
 
   const openLibrary = useCallback(() => {
-    if (window.matchMedia("(min-width: 1024px)").matches) setLibraryOpen(true);
+    if (isDesktop) setLibraryOpen(true);
     else setLibrarySheetOpen(true);
-  }, []);
+  }, [isDesktop]);
 
   const toggleLibrary = useCallback(() => {
-    if (window.matchMedia("(min-width: 1024px)").matches) setLibraryOpen((o) => !o);
+    if (isDesktop) setLibraryOpen((o) => !o);
     else setLibrarySheetOpen(true);
-  }, []);
+  }, [isDesktop]);
 
   const handleStop = useCallback(() => abortRef.current?.abort(), []);
 
@@ -258,12 +268,12 @@ export default function KnowledgePage() {
               <X className="size-4" />
             </Button>
           </div>
-          <div className="min-h-0 flex-1">{libraryOpen && <KnowledgeLibrary />}</div>
+          <div className="min-h-0 flex-1">{isDesktop && libraryOpen && <KnowledgeLibrary />}</div>
         </div>
       </aside>
 
       {/* Phone / tablet library sheet */}
-      <Sheet open={librarySheetOpen} onOpenChange={setLibrarySheetOpen}>
+      <Sheet open={!isDesktop && librarySheetOpen} onOpenChange={setLibrarySheetOpen}>
         <SheetContent side="right" className="w-full p-0 sm:max-w-md">
           <SheetHeader className="pt-safe border-b border-border">
             <SheetTitle>Documents</SheetTitle>
