@@ -14,6 +14,7 @@ const CLIENT_ERROR_TOKENS = [
   "invalid_page_size",
   "invalid_sort_column",
   "invalid_sort_direction",
+  "invalid_changed_within",
   "export_limit_exceeded",
   "start and end dates are required",
 ];

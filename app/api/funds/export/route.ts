@@ -21,6 +21,7 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/reqUser";
 import { callRpc } from "@/lib/fundsRpc";
+import { csvCell, csvResponse } from "@/lib/csvStream";
 import {
   validateExportQuery,
   getComparisonMode,
@@ -31,9 +32,6 @@ import {
 } from "@/lib/fundManager";
 
 export const dynamic = "force-dynamic";
-
-// Rows serialised per stream chunk. Bounds the size of any one string, not a query.
-const CHUNK = 1000;
 
 type ExportResult = { total_rows: number; rows: ExportRow[] };
 
@@ -73,12 +71,6 @@ function headerFor(mode: ComparisonMode): string[] {
     "Conflict Fields",
     "Conflict Reason",
   ];
-}
-
-function csvCell(v: string | number | boolean | null): string {
-  if (v == null) return "";
-  const s = String(v);
-  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
 function toRow(r: ExportRow, mode: ComparisonMode): string {
@@ -122,7 +114,6 @@ export async function GET(request: Request) {
   // gets the default (Par) headers — it is a header-only file either way.
   const mode = getComparisonMode(rows as { comparison_basis: "PAR" | "MARKET_VALUE" }[]);
 
-  const encoder = new TextEncoder();
   // In lookback mode there is no single window — each fund resolved its own — so
   // the file is named for the preset rather than for dates it does not have.
   const span =
@@ -131,30 +122,10 @@ export async function GET(request: Request) {
       : `last-${args.p_lookback}-session${args.p_lookback === 1 ? "" : "s"}`;
   const filename = `fund-position-changes_${span}.csv`;
 
-  let offset = 0;
-  let headerSent = false;
-  const stream = new ReadableStream<Uint8Array>({
-    pull(controller) {
-      if (!headerSent) {
-        headerSent = true;
-        controller.enqueue(encoder.encode(headerFor(mode).map(csvCell).join(",") + "\n"));
-        return;
-      }
-      if (offset >= rows.length) {
-        controller.close();
-        return;
-      }
-      const slice = rows.slice(offset, offset + CHUNK);
-      offset += slice.length;
-      controller.enqueue(encoder.encode(slice.map((r) => toRow(r, mode)).join("\n") + "\n"));
-    },
-  });
-
-  return new NextResponse(stream, {
-    headers: {
-      "Content-Type": "text/csv; charset=utf-8",
-      "Content-Disposition": `attachment; filename="${filename}"`,
-      "Cache-Control": "no-store",
-    },
+  return csvResponse({
+    filename,
+    header: headerFor(mode),
+    rows,
+    toRow: (r) => toRow(r, mode),
   });
 }
