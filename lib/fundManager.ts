@@ -297,6 +297,16 @@ export function validateExportQuery(
 }
 
 /** Truncate a full-precision decimal string toward zero for table display only. */
+/**
+ * ISO YYYY-MM-DD -> DD/MM/YY, the display format for every resolved snapshot date on
+ * /funds (never a polling timestamp). Null renders as an em dash.
+ */
+export function formatDMY(iso: string | null): string {
+  if (!iso) return MISSING_LABEL;
+  const [y, m, d] = iso.split("-");
+  return `${d}/${m}/${y.slice(2)}`;
+}
+
 export function truncateDecimalTowardZero(value: string | null): string {
   if (value == null) return "";
   const neg = value.trim().startsWith("-");
@@ -324,7 +334,7 @@ export const MARKET_VALUE_DISCLOSURE =
 /** Determine the table mode from the returned rows (preferred) or fund status. */
 export function getComparisonMode(
   rows: Pick<ChangeRow, "comparison_basis">[],
-  fundStatus?: Pick<FundStatus, "comparison_basis" | "status">[],
+  fundStatus?: Pick<FundStatus, "comparison_basis">[],
 ): ComparisonMode {
   const bases = new Set<string>();
   for (const r of rows) if (r.comparison_basis) bases.add(r.comparison_basis);

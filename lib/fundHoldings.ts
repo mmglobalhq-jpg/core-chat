@@ -12,6 +12,7 @@ import {
   PRESET_LOOKBACK,
   SORT_DIRECTIONS,
   exportMaxRows,
+  formatDMY,
   optText,
   type ComparisonBasis,
   type Pagination,
@@ -169,12 +170,6 @@ export function validateHoldingsExportQuery(
   };
 }
 
-/** ISO YYYY-MM-DD -> DD/MM/YY, matching fmtDMY on the Changes tab. */
-function dmy(iso: string): string {
-  const [y, m, d] = iso.split("-");
-  return `${d}/${m}/${y.slice(2)}`;
-}
-
 const KIND_TAG: Record<LastChangeKind, "Added" | "Par ↑" | "Par ↓"> = {
   added: "Added",
   par_increased: "Par ↑",
@@ -194,7 +189,7 @@ export function formatLastChange(
   if (!row.last_change_date) {
     return { date: "", tag: null, muted: true, text: "—" };
   }
-  const date = dmy(row.last_change_date);
+  const date = formatDMY(row.last_change_date);
   if (row.since_first) {
     const verb = row.comparison_basis === "MARKET_VALUE" ? "held since" : "unchanged since";
     return { date, tag: null, muted: true, text: `${verb} ${date}` };

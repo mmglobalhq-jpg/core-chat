@@ -1,27 +1,10 @@
 "use client";
 
-import {
-  Suspense,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type MouseEvent as ReactMouseEvent,
-} from "react";
-import Link from "next/link";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
-  ArrowLeft,
-  ArrowUpDown,
   ChevronDown,
-  ChevronLeft,
   ChevronRight,
-  ChevronUp,
-  Columns3,
-  Download,
-  MoveDown,
-  MoveUp,
   TrendingDown,
   TrendingUp,
   TriangleAlert,
@@ -31,26 +14,17 @@ import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { ThemeToggle } from "@/components/theme/ThemeToggle";
-import { supabase } from "@/lib/supabaseClient";
 import { cn } from "@/lib/utils";
 import {
-  ALLOWED_PAGE_SIZES,
   CHANGE_TYPES,
   DEFAULT_PAGE_SIZE,
   DEFAULT_SORT_COLUMN,
-  MARKET_VALUE_DISCLOSURE,
   UNMAPPED_LABEL,
   UNMAPPED_TOKEN,
-  formatSecurityType,
-  fundDisplayLabel,
+  formatDMY,
   getAmountLabels,
-  getBasisLabel,
   getComparisonMode,
   normalizePositionChangeRow,
   truncateDecimalTowardZero,
@@ -59,6 +33,30 @@ import {
   type ComparisonMode,
   type FundStatus,
 } from "@/lib/fundManager";
+import { HoldingsTab } from "./HoldingsTab";
+import {
+  ColumnsMenu,
+  DataCell,
+  Field,
+  FundOptionList,
+  FundsHeader,
+  FundsTabs,
+  MarketValueNote,
+  PaginationBar,
+  SecurityCell,
+  SortHeader,
+  authedFetch,
+  filterCls,
+  inputCls,
+  isSecurityColumn,
+  stickyOffsets,
+  useColumnLayout,
+  useCsvExport,
+  useDebouncedUrlText,
+  useFundOptions,
+  usePatchUrl,
+  type ColumnDef,
+} from "./fundsUi";
 
 // --------------------------------------------------------------------------- //
 // Column layout
@@ -74,20 +72,11 @@ type ColKey =
   | "comparison_basis"
   | "change_type";
 
-type ColDef = {
-  key: ColKey;
-  label: string;
-  align: "left" | "right";
-  w: number;
-  pinned?: boolean; // pinned columns are always first, never hidden/reordered
-  sortable?: boolean;
-};
-
 // position_amount/position_change labels are basis-aware at render (see labelFor);
 // comparison_basis (Basis) is shown only for mixed-basis results.
-const COLUMNS: ColDef[] = [
-  { key: "fund_ticker", label: "Fund", align: "left", w: 90, pinned: true },
-  { key: "security_id", label: "CUSIP / Security ID", align: "left", w: 170, pinned: true, sortable: true },
+const COLUMNS: ColumnDef<ColKey>[] = [
+  { key: "fund_ticker", label: "Fund", align: "left", w: 90, pinned: true, sticky: true },
+  { key: "security_id", label: "CUSIP / Security ID", align: "left", w: 170, pinned: true, sticky: true, sortable: true },
   { key: "description", label: "Description", align: "left", w: 280, sortable: true },
   { key: "security_type", label: "Security Type", align: "left", w: 150, sortable: true },
   { key: "sector_type", label: "Sector Type", align: "left", w: 120, sortable: true },
@@ -96,7 +85,10 @@ const COLUMNS: ColDef[] = [
   { key: "comparison_basis", label: "Basis", align: "left", w: 110 },
   { key: "change_type", label: "Change Type", align: "left", w: 160, sortable: true },
 ];
-const COL_BY_KEY = Object.fromEntries(COLUMNS.map((c) => [c.key, c])) as Record<ColKey, ColDef>;
+const COL_BY_KEY = Object.fromEntries(COLUMNS.map((c) => [c.key, c])) as Record<
+  ColKey,
+  ColumnDef<ColKey>
+>;
 const PINNED: ColKey[] = COLUMNS.filter((c) => c.pinned).map((c) => c.key);
 // The Basis column is auto-managed (shown only for mixed results), so it is kept
 // out of the reorder / show-hide machinery.
@@ -104,9 +96,6 @@ const NON_PINNED: ColKey[] = COLUMNS.filter(
   (c) => !c.pinned && c.key !== "comparison_basis",
 ).map((c) => c.key);
 const LAYOUT_KEY = "fundmgr:layout";
-
-type Layout = { order: ColKey[]; hidden: ColKey[]; widths: Partial<Record<ColKey, number>> };
-const DEFAULT_LAYOUT: Layout = { order: NON_PINNED, hidden: [], widths: {} };
 
 // --------------------------------------------------------------------------- //
 // Formatting
@@ -128,13 +117,6 @@ const PRESETS: { key: string; label: string }[] = [
 // the "1D" window was blank for 16 of 17 funds. Counting snapshots instead is
 // weekend-, holiday- and lag-aware without the browser carrying an NYSE calendar.
 
-/** DD/MM/YY display format for resolved dates (never a polling timestamp). */
-function fmtDMY(iso: string | null): string {
-  if (!iso) return "—";
-  const [y, m, d] = iso.split("-");
-  return `${d}/${m}/${y.slice(2)}`;
-}
-
 const CHANGE_META: Record<
   string,
   { icon: typeof TrendingUp; color: string; iconLabel: string }
@@ -149,28 +131,6 @@ const CHANGE_META: Record<
     iconLabel: "warning",
   },
 };
-
-const inputCls =
-  "h-9 w-full rounded-md border border-input bg-background px-3 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40";
-const filterCls =
-  "h-7 w-full min-w-0 rounded border border-input bg-background px-2 text-xs outline-none focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/40";
-
-function Field({
-  label,
-  className,
-  children,
-}: {
-  label: string;
-  className?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <label className={cn("flex flex-col gap-1.5", className)}>
-      <span className="text-xs font-medium text-muted-foreground">{label}</span>
-      {children}
-    </label>
-  );
-}
 
 // --------------------------------------------------------------------------- //
 // URL state
@@ -187,16 +147,6 @@ function readCommitted(sp: URLSearchParams): Committed {
   };
 }
 
-async function authedFetch(input: string, init?: RequestInit): Promise<Response> {
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-  return fetch(input, {
-    ...init,
-    headers: { ...(init?.headers ?? {}), Authorization: `Bearer ${session?.access_token ?? ""}` },
-  });
-}
-
 // --------------------------------------------------------------------------- //
 // Page
 // --------------------------------------------------------------------------- //
@@ -205,9 +155,18 @@ export default function FundsPageWrapper() {
     <Suspense
       fallback={<div className="grid h-dvh place-items-center text-muted-foreground">Loading…</div>}
     >
-      <FundManagerPage />
+      <FundsView />
     </Suspense>
   );
+}
+
+/** The tab lives in the URL (tab=holdings); Changes is the default. */
+function FundsView() {
+  const sp = useSearchParams();
+  if (sp.get("tab") === "holdings") {
+    return <HoldingsTab manager={sp.get("manager") ?? ""} fund={sp.get("fund") ?? ""} />;
+  }
+  return <FundManagerPage />;
 }
 
 function FundManagerPage() {
@@ -218,9 +177,9 @@ function FundManagerPage() {
   // resolves its own window server-side.
   const hasQuery = Boolean((committed.start && committed.end) || committed.preset);
 
+  const patchUrl = usePatchUrl();
+
   // Options.
-  const [managers, setManagers] = useState<string[]>([]);
-  const [allFunds, setAllFunds] = useState<{ ticker: string; fund_manager: string }[]>([]);
   const [securityTypes, setSecurityTypes] = useState<string[]>([]);
   const [sectorTypes, setSectorTypes] = useState<string[]>([]);
   const [sectorHasNull, setSectorHasNull] = useState(false);
@@ -239,7 +198,11 @@ function FundManagerPage() {
   const [error, setError] = useState<string | null>(null);
 
   // Column layout (persisted per browser).
-  const [layout, setLayout] = useState<Layout>(DEFAULT_LAYOUT);
+  const { layout, widthOf, startResize, moveColumn, toggleHidden, restore } = useColumnLayout(
+    LAYOUT_KEY,
+    COLUMNS,
+    NON_PINNED,
+  );
   // Collapsed fund groups (session only — deliberately not persisted).
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
@@ -247,7 +210,7 @@ function FundManagerPage() {
   const [qSecurity, setQSecurity] = useState(sp.get("q_security") ?? "");
   const [qDescription, setQDescription] = useState(sp.get("q_description") ?? "");
 
-  const [exporting, setExporting] = useState(false);
+  const { exporting, run: runExport } = useCsvExport(setError);
   const reqId = useRef(0);
 
   // Re-sync the draft controls whenever the committed (URL) query changes via
@@ -263,43 +226,10 @@ function FundManagerPage() {
   }, [committed.manager, committed.fund, committed.start, committed.end, committed.preset]);
 
   // Load managers + funds + latest once.
-  useEffect(() => {
-    authedFetch("/api/funds/options")
-      .then((r) => r.json())
-      .then((d) => {
-        setManagers(d.managers ?? []);
-        setAllFunds(d.funds ?? []);
-        setScopeLatest(d.latestDate ?? null);
-      })
-      .catch(() => setError("Failed to load managers and funds."));
-  }, []);
-
-  // Restore persisted column layout.
-  useEffect(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem(LAYOUT_KEY) || "null");
-      if (saved && Array.isArray(saved.order)) {
-        const order = (saved.order as ColKey[]).filter((k) => NON_PINNED.includes(k));
-        for (const k of NON_PINNED) if (!order.includes(k)) order.push(k);
-        setLayout({
-          order,
-          hidden: (saved.hidden ?? []).filter((k: ColKey) => NON_PINNED.includes(k)),
-          widths: saved.widths ?? {},
-        });
-      }
-    } catch {
-      /* ignore malformed storage */
-    }
-  }, []);
-
-  const persistLayout = useCallback((next: Layout) => {
-    setLayout(next);
-    try {
-      localStorage.setItem(LAYOUT_KEY, JSON.stringify(next));
-    } catch {
-      /* ignore */
-    }
-  }, []);
+  const { managers, funds: allFunds } = useFundOptions({
+    onLatestDate: setScopeLatest,
+    onError: () => setError("Failed to load managers and funds."),
+  });
 
   // Latest date for the DRAFT scope (drives End default + presets).
   useEffect(() => {
@@ -396,38 +326,14 @@ function FundManagerPage() {
   }, [hasQuery, spString]);
 
   // Debounce the two free-text filters into the URL (300 ms).
-  useEffect(() => {
-    if (!hasQuery) return;
-    const t = setTimeout(() => {
-      patchUrl({ q_security: qSecurity || null, page: null }, "replace");
-    }, 300);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [qSecurity]);
-  useEffect(() => {
-    if (!hasQuery) return;
-    const t = setTimeout(() => {
-      patchUrl({ q_description: qDescription || null, page: null }, "replace");
-    }, 300);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [qDescription]);
-
-  // --- URL writers ------------------------------------------------------- //
-  const patchUrl = useCallback(
-    (patch: Record<string, string | null>, mode: "push" | "replace" = "replace") => {
-      const next = new URLSearchParams(sp.toString());
-      for (const [k, v] of Object.entries(patch)) {
-        if (v == null || v === "") next.delete(k);
-        else next.set(k, v);
-      }
-      const url = `/funds?${next.toString()}`;
-      if (mode === "push") router.push(url);
-      else router.replace(url);
-    },
-    [router, sp],
+  useDebouncedUrlText(qSecurity, hasQuery, (v) =>
+    patchUrl({ q_security: v || null, page: null }, "replace"),
+  );
+  useDebouncedUrlText(qDescription, hasQuery, (v) =>
+    patchUrl({ q_description: v || null, page: null }, "replace"),
   );
 
+  // --- URL writers ------------------------------------------------------- //
   function submit() {
     if (!draft.preset && (!draft.start || !draft.end)) return;
     // A new comparison is a history entry; filters/sort/page reset.
@@ -503,7 +409,6 @@ function FundManagerPage() {
     const idx = at >= 0 ? at : ordered.length;
     return [...ordered.slice(0, idx), "comparison_basis", ...ordered.slice(idx)];
   }, [layout, mode]);
-  const widthOf = (k: ColKey) => layout.widths[k] ?? COL_BY_KEY[k].w;
   const totalWidth = visibleCols.reduce((a, k) => a + widthOf(k), 0);
 
   const sort = sp.get("sort") ?? DEFAULT_SORT_COLUMN;
@@ -524,48 +429,7 @@ function FundManagerPage() {
     }
   }
 
-  function startResize(col: ColKey, e: ReactMouseEvent) {
-    e.preventDefault();
-    e.stopPropagation();
-    const startX = e.clientX;
-    const startW = widthOf(col);
-    const onMove = (ev: MouseEvent) => {
-      const w = Math.max(56, startW + (ev.clientX - startX));
-      setLayout((l) => ({ ...l, widths: { ...l.widths, [col]: w } }));
-    };
-    const onUp = () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-      document.body.style.cursor = "";
-      setLayout((l) => {
-        const next = l;
-        try {
-          localStorage.setItem(LAYOUT_KEY, JSON.stringify(next));
-        } catch {
-          /* ignore */
-        }
-        return next;
-      });
-    };
-    document.body.style.cursor = "col-resize";
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-  }
-
-  function moveColumn(key: ColKey, delta: number) {
-    const order = [...layout.order];
-    const i = order.indexOf(key);
-    const j = i + delta;
-    if (i < 0 || j < 0 || j >= order.length) return;
-    [order[i], order[j]] = [order[j], order[i]];
-    persistLayout({ ...layout, order });
-  }
-  function toggleHidden(key: ColKey) {
-    const hidden = layout.hidden.includes(key)
-      ? layout.hidden.filter((k) => k !== key)
-      : [...layout.hidden, key];
-    persistLayout({ ...layout, hidden });
-  }
+  const offsets = stickyOffsets(visibleCols, (k) => Boolean(COL_BY_KEY[k].sticky), widthOf);
 
   function toggleChangeType(ct: string) {
     const set = new Set(activeChangeTypes);
@@ -574,35 +438,17 @@ function FundManagerPage() {
     patchUrl({ change_type: [...set].join(",") || null, page: null }, "replace");
   }
 
-  async function exportCsv() {
-    setExporting(true);
-    setError(null);
-    try {
-      // `preset` is kept — the export RPC resolves it per fund exactly as the table does.
-      const params = new URLSearchParams(spString);
-      params.delete("page");
-      params.delete("page_size");
-      const res = await authedFetch(`/api/funds/export?${params}`);
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.error ?? `Export failed (${res.status})`);
-      }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = committed.preset
+  function exportCsv() {
+    // `preset` is kept — the export RPC resolves it per fund exactly as the table does.
+    const params = new URLSearchParams(spString);
+    params.delete("page");
+    params.delete("page_size");
+    void runExport(
+      `/api/funds/export?${params}`,
+      committed.preset
         ? `fund-position-changes_${committed.preset}.csv`
-        : `fund-position-changes_${committed.start}_${committed.end}.csv`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 10_000);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Export failed.");
-    } finally {
-      setExporting(false);
-    }
+        : `fund-position-changes_${committed.start}_${committed.end}.csv`,
+    );
   }
 
   // Group the current page's rows by fund, preserving server order.
@@ -630,37 +476,25 @@ function FundManagerPage() {
 
   return (
     <div className="flex h-dvh flex-col bg-background text-foreground">
-      <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border px-4">
-        <Button asChild variant="ghost" size="icon" className="size-9" aria-label="Back to chat">
-          <Link href="/">
-            <ArrowLeft className="size-5" />
-          </Link>
-        </Button>
-        <h1 className="text-base font-medium">Fund Manager</h1>
-        <div className="ml-auto flex items-center gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="gap-1.5"
-            onClick={exportCsv}
-            disabled={!hasQuery || exporting}
-          >
-            <Download className="size-4" />
-            {exporting ? "Exporting…" : "Export CSV"}
-          </Button>
+      <FundsHeader
+        onExport={exportCsv}
+        exportDisabled={!hasQuery}
+        exporting={exporting}
+        columnsMenu={
           <ColumnsMenu
+            pinned={PINNED}
             layout={layout}
+            labelOf={(k) => COL_BY_KEY[k].label}
             onMove={moveColumn}
             onToggleHidden={toggleHidden}
-            onRestore={() => persistLayout(DEFAULT_LAYOUT)}
+            onRestore={restore}
           />
-          <ThemeToggle />
-        </div>
-      </header>
+        }
+      />
 
       {/* Controls (~20%) — nothing runs until Submit. */}
       <section className="max-h-[26%] shrink-0 overflow-auto border-b border-border p-4">
+        <FundsTabs active="changes" />
         <div className="flex flex-wrap items-end gap-4">
           <Field label="Fund Manager" className="w-52">
             <select
@@ -684,16 +518,7 @@ function FundManagerPage() {
               onChange={(e) => setDraft((d) => ({ ...d, fund: e.target.value }))}
             >
               <option value="">All Funds</option>
-              {fundsForManager.map((f) => {
-                const d = fundDisplayLabel(f.ticker);
-                const aliasHint = d.aliases.length ? ` (${d.aliases.join(" / ")})` : "";
-                return (
-                  <option key={f.ticker} value={f.ticker} title={d.aliases.join(" / ")}>
-                    {d.label}
-                    {aliasHint}
-                  </option>
-                );
-              })}
+              <FundOptionList funds={fundsForManager} />
             </select>
           </Field>
 
@@ -823,14 +648,7 @@ function FundManagerPage() {
             </div>
 
             {/* Market-value disclosure — shown for MARKET_VALUE-only and mixed results. */}
-            {(mode === "market_value" || mode === "mixed") && (
-              <div
-                className="border-b border-border bg-amber-50 px-4 py-2 text-xs text-amber-900 dark:bg-amber-950/40 dark:text-amber-200"
-                role="note"
-              >
-                {MARKET_VALUE_DISCLOSURE}
-              </div>
-            )}
+            {(mode === "market_value" || mode === "mixed") && <MarketValueNote />}
 
             {/* Per-fund status notices (insufficient history / no snapshot). */}
             {problemFunds.length > 0 && (
@@ -858,48 +676,18 @@ function FundManagerPage() {
                   <tr className="text-left text-muted-foreground">
                     {visibleCols.map((k, idx) => {
                       const c = COL_BY_KEY[k];
-                      const active = sort === k;
                       return (
-                        <th
+                        <SortHeader
                           key={k}
-                          style={c.pinned ? { left: idx === 0 ? 0 : widthOf("fund_ticker") } : undefined}
-                          className={cn(
-                            "relative overflow-hidden px-3 py-2 font-medium",
-                            c.align === "right" && "text-right",
-                            c.pinned && "sticky z-20 bg-muted/90",
-                          )}
-                        >
-                          <button
-                            type="button"
-                            onClick={() => toggleSort(k)}
-                            disabled={!c.sortable}
-                            className={cn(
-                              "inline-flex max-w-full items-center gap-1 truncate",
-                              c.sortable && "hover:text-foreground",
-                              !c.sortable && "cursor-default",
-                              c.align === "right" && "flex-row-reverse",
-                            )}
-                          >
-                            {labelFor(k)}
-                            {c.sortable &&
-                              (active ? (
-                                dir === "asc" ? (
-                                  <ChevronUp className="size-3.5 shrink-0" />
-                                ) : (
-                                  <ChevronDown className="size-3.5 shrink-0" />
-                                )
-                              ) : (
-                                <ArrowUpDown className="size-3 shrink-0 opacity-40" />
-                              ))}
-                          </button>
-                          <span
-                            onMouseDown={(e) => startResize(k, e)}
-                            className="absolute right-0 top-0 h-full w-1.5 cursor-col-resize touch-none select-none hover:bg-primary/50"
-                            role="separator"
-                            aria-orientation="vertical"
-                            aria-label={`Resize ${labelFor(k)} column`}
-                          />
-                        </th>
+                          label={labelFor(k)}
+                          align={c.align}
+                          sortable={Boolean(c.sortable)}
+                          active={sort === k}
+                          dir={dir}
+                          stickyLeft={offsets[idx]}
+                          onSort={() => toggleSort(k)}
+                          onResizeStart={(e) => startResize(k, e)}
+                        />
                       );
                     })}
                   </tr>
@@ -916,7 +704,7 @@ function FundManagerPage() {
                         status={st}
                         colSpan={visibleCols.length}
                         cols={visibleCols}
-                        fundWidth={widthOf("fund_ticker")}
+                        offsets={offsets}
                         collapsed={isCollapsed}
                         onToggle={() =>
                           setCollapsed((s) => {
@@ -956,58 +744,15 @@ function FundManagerPage() {
               )}
             </div>
 
-            {/* Pagination */}
-            <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-2 text-sm text-muted-foreground">
-              <div className="flex items-center gap-3">
-                <span>
-                  {total === 0
-                    ? "0 rows"
-                    : `${((page - 1) * pageSize + 1).toLocaleString()}–${Math.min(
-                        page * pageSize,
-                        total,
-                      ).toLocaleString()} of ${total.toLocaleString()}`}
-                </span>
-                <label className="flex items-center gap-1">
-                  Rows
-                  <select
-                    className={cn(filterCls, "h-8 w-20")}
-                    value={pageSize}
-                    onChange={(e) => patchUrl({ page_size: e.target.value, page: "1" }, "replace")}
-                  >
-                    {ALLOWED_PAGE_SIZES.map((s) => (
-                      <option key={s} value={s}>
-                        {s}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-              <div className="flex items-center gap-2">
-                <span>
-                  Page {page} / {Math.max(1, totalPages)}
-                </span>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  className="size-8"
-                  disabled={page <= 1 || loading}
-                  onClick={() => patchUrl({ page: String(page - 1) }, "replace")}
-                  aria-label="Previous page"
-                >
-                  <ChevronLeft className="size-4" />
-                </Button>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  className="size-8"
-                  disabled={page >= totalPages || loading}
-                  onClick={() => patchUrl({ page: String(page + 1) }, "replace")}
-                  aria-label="Next page"
-                >
-                  <ChevronRight className="size-4" />
-                </Button>
-              </div>
-            </div>
+            <PaginationBar
+              total={total}
+              page={page}
+              pageSize={pageSize}
+              totalPages={totalPages}
+              loading={loading}
+              onPageSize={(size) => patchUrl({ page_size: size, page: "1" }, "replace")}
+              onPage={(p) => patchUrl({ page: String(p) }, "replace")}
+            />
           </>
         )}
       </section>
@@ -1031,7 +776,7 @@ function FundGroup({
   status,
   colSpan,
   cols,
-  fundWidth,
+  offsets,
   collapsed,
   onToggle,
 }: {
@@ -1040,7 +785,7 @@ function FundGroup({
   status: FundStatus | undefined;
   colSpan: number;
   cols: ColKey[];
-  fundWidth: number;
+  offsets: (number | null)[];
   collapsed: boolean;
   onToggle: () => void;
 }) {
@@ -1064,9 +809,9 @@ function FundGroup({
               {/* The first date is the comparison BASELINE — the snapshot changes are
                   measured against — not the first day of the requested window. */}
               <span title="Comparison baseline — changes are measured from this snapshot">
-                baseline {fmtDMY(status?.actual_start_date ?? null)}
+                baseline {formatDMY(status?.actual_start_date ?? null)}
               </span>{" "}
-              → {fmtDMY(status?.actual_end_date ?? null)}
+              → {formatDMY(status?.actual_end_date ?? null)}
               {" · "}
               {rows.length} on page of {status?.matching_row_count ?? rows.length} rows
               {status && status.warning_count > 0 && (
@@ -1090,21 +835,12 @@ function FundGroup({
                 key={k}
                 colKey={k}
                 row={r}
-                leftOffset={idx === 0 ? 0 : idx === 1 ? fundWidth : null}
+                leftOffset={offsets[idx]}
               />
             ))}
           </tr>
         ))}
     </>
-  );
-}
-
-function ConflictMark({ reason }: { reason: string | null }) {
-  return (
-    <TriangleAlert
-      className="ml-1 inline size-3.5 shrink-0 text-amber-600 dark:text-amber-400"
-      aria-label={reason ?? "Metadata conflict"}
-    />
   );
 }
 
@@ -1117,171 +853,56 @@ function Cell({
   row: ChangeRow;
   leftOffset: number | null;
 }) {
-  const conflicts = new Set(row.conflict_fields);
-  const pinned = leftOffset != null;
-  const base = cn("px-3 py-1.5", pinned && "sticky z-10 bg-background");
-  const style = pinned ? { left: leftOffset } : undefined;
-
-  let className = base;
-  let content: React.ReactNode = null;
-  let title: string | undefined;
-
+  if (isSecurityColumn(colKey)) {
+    return (
+      <SecurityCell
+        colKey={colKey}
+        row={row}
+        sectorConflict={row.change_type === "Metadata Conflict"}
+        stickyLeft={leftOffset}
+      />
+    );
+  }
   switch (colKey) {
     case "fund_ticker":
-      className = cn(base, "font-mono");
-      content = row.fund_ticker;
-      break;
-    case "security_id":
-      className = cn(base, "font-mono");
-      content = row.security_id;
-      break;
-    case "description":
-      className = cn(base, "overflow-hidden text-ellipsis");
-      title = row.description ?? "";
-      content = (
-        <>
-          {row.description ?? ""}
-          {conflicts.has("description") && <ConflictMark reason={row.conflict_reason} />}
-        </>
+      return (
+        <DataCell stickyLeft={leftOffset} className="font-mono">
+          {row.fund_ticker}
+        </DataCell>
       );
-      break;
-    case "security_type":
-      content = (
-        <>
-          {/* Missing security type → em dash (never a sector/issuer substitute). */}
-          {row.security_type == null ? (
-            <span className="text-muted-foreground">{formatSecurityType(null)}</span>
-          ) : (
-            row.security_type
-          )}
-          {conflicts.has("security_type") && <ConflictMark reason={row.conflict_reason} />}
-        </>
-      );
-      break;
-    case "sector_type": {
-      const unmapped = row.sector_type == null && row.change_type !== "Metadata Conflict";
-      className = cn(
-        base,
-        row.change_type === "Metadata Conflict" && "text-amber-600 dark:text-amber-400",
-        unmapped && "text-muted-foreground italic",
-      );
-      content = (
-        <>
-          {/* Null sector → "Unmapped" (never stored). */}
-          {row.sector_type == null && row.change_type !== "Metadata Conflict"
-            ? UNMAPPED_LABEL
-            : (row.sector_type ?? "")}
-          {conflicts.has("sector_type") && <ConflictMark reason={row.conflict_reason} />}
-        </>
-      );
-      break;
-    }
-    case "position_amount":
-      className = cn(base, "text-right font-mono tabular-nums");
-      content = row.position_amount == null ? "—" : truncateDecimalTowardZero(row.position_amount);
-      break;
     case "position_change": {
       const neg = (row.position_change ?? "").trim().startsWith("-");
-      className = cn(
-        base,
-        "text-right font-mono tabular-nums",
-        row.position_change != null && !neg && "text-emerald-600 dark:text-emerald-400",
-        row.position_change != null && neg && "text-red-600 dark:text-red-400",
+      return (
+        <DataCell
+          stickyLeft={leftOffset}
+          className={cn(
+            "text-right font-mono tabular-nums",
+            row.position_change != null && !neg && "text-emerald-600 dark:text-emerald-400",
+            row.position_change != null && neg && "text-red-600 dark:text-red-400",
+          )}
+        >
+          {row.position_change == null ? "—" : truncateDecimalTowardZero(row.position_change)}
+        </DataCell>
       );
-      content = row.position_change == null ? "—" : truncateDecimalTowardZero(row.position_change);
-      break;
     }
-    case "comparison_basis":
-      content = <span className="text-muted-foreground">{getBasisLabel(row.comparison_basis)}</span>;
-      break;
     case "change_type": {
       const meta = CHANGE_META[row.change_type];
       const Icon = meta?.icon;
-      content = (
-        <span className={cn("inline-flex items-center gap-1.5", meta?.color)}>
-          {Icon && <Icon className="size-3.5 shrink-0" aria-hidden />}
-          {row.change_type}
-        </span>
+      return (
+        <DataCell stickyLeft={leftOffset}>
+          <span className={cn("inline-flex items-center gap-1.5", meta?.color)}>
+            {Icon && <Icon className="size-3.5 shrink-0" aria-hidden />}
+            {row.change_type}
+          </span>
+        </DataCell>
       );
-      break;
     }
   }
-
-  return (
-    <td className={className} style={style} title={title}>
-      {content}
-    </td>
-  );
 }
 
 // --------------------------------------------------------------------------- //
 // Menus
 // --------------------------------------------------------------------------- //
-function ColumnsMenu({
-  layout,
-  onMove,
-  onToggleHidden,
-  onRestore,
-}: {
-  layout: Layout;
-  onMove: (k: ColKey, delta: number) => void;
-  onToggleHidden: (k: ColKey) => void;
-  onRestore: () => void;
-}) {
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="outline" size="sm" className="gap-1.5">
-          <Columns3 className="size-4" />
-          Columns
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-64">
-        <DropdownMenuLabel>Pinned</DropdownMenuLabel>
-        {PINNED.map((k) => (
-          <DropdownMenuItem key={k} disabled className="opacity-70">
-            {COL_BY_KEY[k].label}
-          </DropdownMenuItem>
-        ))}
-        <DropdownMenuSeparator />
-        <DropdownMenuLabel>Columns</DropdownMenuLabel>
-        {layout.order.map((k, i) => (
-          <div key={k} className="flex items-center gap-1 px-2 py-1">
-            <input
-              type="checkbox"
-              className="size-4 accent-primary"
-              checked={!layout.hidden.includes(k)}
-              onChange={() => onToggleHidden(k)}
-              aria-label={`Show ${COL_BY_KEY[k].label}`}
-            />
-            <span className="flex-1 truncate text-sm">{COL_BY_KEY[k].label}</span>
-            <button
-              type="button"
-              className="rounded p-0.5 hover:bg-muted disabled:opacity-30"
-              disabled={i === 0}
-              onClick={() => onMove(k, -1)}
-              aria-label={`Move ${COL_BY_KEY[k].label} up`}
-            >
-              <MoveUp className="size-3.5" />
-            </button>
-            <button
-              type="button"
-              className="rounded p-0.5 hover:bg-muted disabled:opacity-30"
-              disabled={i === layout.order.length - 1}
-              onClick={() => onMove(k, 1)}
-              aria-label={`Move ${COL_BY_KEY[k].label} down`}
-            >
-              <MoveDown className="size-3.5" />
-            </button>
-          </div>
-        ))}
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={onRestore}>Restore default layout</DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
-
 function ChangeTypeMenu({
   active,
   onToggle,
