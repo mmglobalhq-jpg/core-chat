@@ -1,6 +1,6 @@
 # Fund Manager: current-holdings tab — design
 
-*2026-10-25. Status: revised after builder review; awaiting owner approval of the whole.*
+*2026-10-25. Status: **approved by the owner 2026-10-25.***
 
 ## Why
 
