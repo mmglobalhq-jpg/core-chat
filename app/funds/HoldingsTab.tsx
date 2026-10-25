@@ -274,12 +274,17 @@ export function HoldingsTab({ manager, fund }: { manager: string; fund: string }
 
   function setScope(patch: { manager?: string; fund?: string }) {
     // A scope change loads immediately and starts from page 1. A fund belongs to
-    // its manager, so changing the manager clears the fund.
+    // its manager, so changing the manager clears the fund. The scope is shared with
+    // Changes, so its scope-dependent state goes too: a stale `page` would show
+    // "Page 7 / 2" over an empty table, and an old filter would apply unseen.
     patchUrl(
       {
         ...("manager" in patch ? { manager: patch.manager ?? null, fund: null } : {}),
         ...("fund" in patch ? { fund: patch.fund ?? null } : {}),
         h_page: null,
+        page: null,
+        f_security_type: null,
+        f_sector_type: null,
       },
       "replace",
     );

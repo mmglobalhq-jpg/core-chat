@@ -236,8 +236,16 @@ export function FundsHeader({
   columnsMenu: ReactNode;
 }) {
   return (
-    <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border px-4">
-      <Button asChild variant="ghost" size="icon" className="size-9" aria-label="Back to chat">
+    // viewportFit "cover": pad past the status bar / notch. box-content keeps the
+    // 56px bar below the inset rather than shrinking it.
+    <header className="box-content flex h-14 shrink-0 items-center gap-2 border-b border-border pt-[env(safe-area-inset-top)] pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))]">
+      <Button
+        asChild
+        variant="ghost"
+        size="icon"
+        className="size-9 pointer-coarse:size-11"
+        aria-label="Back to chat"
+      >
         <Link href="/">
           <ArrowLeft className="size-5" />
         </Link>
@@ -248,7 +256,7 @@ export function FundsHeader({
           type="button"
           variant="outline"
           size="sm"
-          className="gap-1.5"
+          className="gap-1.5 pointer-coarse:h-11"
           onClick={onExport}
           disabled={exportDisabled || exporting}
         >
@@ -450,7 +458,7 @@ export function ColumnsMenu<K extends string>({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="outline" size="sm" className="gap-1.5">
+        <Button variant="outline" size="sm" className="gap-1.5 pointer-coarse:h-11">
           <Columns3 className="size-4" />
           Columns
         </Button>

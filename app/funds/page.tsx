@@ -348,6 +348,10 @@ function FundManagerPage() {
     }
     next.set("page", "1");
     next.set("page_size", sp.get("page_size") ?? String(DEFAULT_PAGE_SIZE));
+    // The Holdings tab's query (h_* and `changed`) is not this comparison's to reset.
+    for (const [k, v] of sp.entries()) {
+      if (k.startsWith("h_") || k === "changed") next.set(k, v);
+    }
     router.push(`/funds?${next.toString()}`);
   }
 

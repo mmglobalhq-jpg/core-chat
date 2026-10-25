@@ -296,7 +296,6 @@ export function validateExportQuery(
   };
 }
 
-/** Truncate a full-precision decimal string toward zero for table display only. */
 /**
  * ISO YYYY-MM-DD -> DD/MM/YY, the display format for every resolved snapshot date on
  * /funds (never a polling timestamp). Null renders as an em dash.
@@ -307,6 +306,7 @@ export function formatDMY(iso: string | null): string {
   return `${d}/${m}/${y.slice(2)}`;
 }
 
+/** Truncate a full-precision decimal string toward zero for table display only. */
 export function truncateDecimalTowardZero(value: string | null): string {
   if (value == null) return "";
   const neg = value.trim().startsWith("-");

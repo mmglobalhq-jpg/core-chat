@@ -429,6 +429,68 @@ describe("Holdings tab", () => {
     expect(url.get("tab")).toBe("holdings");
   });
 
+  it("a scope change on Holdings also clears Changes' page and scope-dependent filters", async () => {
+    // Otherwise returning to Changes shows "Page 7 / 2" over an empty table that reads
+    // as "no changes", or applies a hidden filter from the old scope.
+    currentParams = new URLSearchParams({
+      tab: "holdings",
+      manager: "JP Morgan",
+      preset: "1D",
+      page: "7",
+      f_sector_type: "UST",
+      f_security_type: "TREASURY NOTES",
+    });
+    vi.stubGlobal("fetch", mockFetch());
+    render(<FundsPage />);
+    await screen.findByText("ADD0001");
+    await screen.findByRole("option", { name: "Regan" });
+
+    fireEvent.change(screen.getByLabelText("Fund Manager"), { target: { value: "Regan" } });
+    const url = lastUrl(replace);
+    expect(url.get("manager")).toBe("Regan");
+    expect(url.get("page")).toBeNull();
+    expect(url.get("f_sector_type")).toBeNull();
+    expect(url.get("f_security_type")).toBeNull();
+    expect(url.get("preset")).toBe("1D"); // the Changes comparison itself is kept
+  });
+
+  it("submitting a Changes comparison keeps the Holdings query in the URL", async () => {
+    currentParams = new URLSearchParams({
+      start: "2026-10-01",
+      end: "2026-10-23",
+      h_sort: "description",
+      changed: "7D",
+    });
+    vi.stubGlobal("fetch", mockFetch());
+    render(<FundsPage />);
+    await screen.findByText(/No position changes found/);
+
+    fireEvent.click(screen.getByText("Submit"));
+    const url = lastUrl(push);
+    expect(url.get("start")).toBe("2026-10-01");
+    expect(url.get("h_sort")).toBe("description");
+    expect(url.get("changed")).toBe("7D");
+  });
+
+  it("the header clears the iPhone status bar and has 44pt touch targets on touch", async () => {
+    currentParams = new URLSearchParams({ tab: "holdings" });
+    vi.stubGlobal("fetch", mockFetch());
+    const { container } = render(<FundsPage />);
+    await screen.findByText("ADD0001");
+
+    const header = container.querySelector("header")!;
+    expect(header.className).toContain("pt-[env(safe-area-inset-top)]");
+    expect(screen.getByRole("link", { name: "Back to chat" }).className).toContain(
+      "pointer-coarse:size-11",
+    );
+    expect(screen.getByRole("button", { name: /Export CSV/ }).className).toContain(
+      "pointer-coarse:h-11",
+    );
+    expect(screen.getByRole("button", { name: /Columns/ }).className).toContain(
+      "pointer-coarse:h-11",
+    );
+  });
+
   it("header clicks re-sort server-side via h_sort / h_dir", async () => {
     currentParams = new URLSearchParams({ tab: "holdings" });
     vi.stubGlobal("fetch", mockFetch());
