@@ -1,9 +1,16 @@
 /**
- * GET /api/funds/export — streamed, basis-aware CSV of ALL matching position-change
- * rows (every fund/date/filter the table would show, across all pages, including
- * Metadata Conflict and null-sector rows). Reuses the same validated params and the
- * same poller RPCs as the table. Streamed in bounded chunks so neither the server
- * nor the browser holds the whole export in memory. Read-only, auth-gated.
+ * GET /api/funds/export — basis-aware CSV of ALL matching position-change rows
+ * (every fund/date/filter the table would show, across all pages, including
+ * Metadata Conflict and null-sector rows). Reuses the same validated params as the
+ * table. Read-only, auth-gated.
+ *
+ * ONE database call: get_fund_position_changes_export_json (poller migration 0011)
+ * computes the comparison once and returns every row in a single scalar. This route
+ * used to page a row-set RPC 1,000 rows at a time (Supabase's max-rows); PostgREST
+ * cannot push LIMIT/OFFSET into a PL/pgSQL function, so each chunk re-ran the whole
+ * comparison — ~17 runs for a 30-day all-manager export. The trade is that the rows
+ * are held in memory here, bounded by FUNDS_EXPORT_MAX_ROWS; the CSV text is still
+ * produced incrementally, a chunk of rows at a time.
  *
  * Headers are basis-aware (Par / Market Value / Position + a Basis column for mixed
  * results); values always come from position_amount/position_change as exact decimal
@@ -13,22 +20,22 @@
  */
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/reqUser";
-import { mapRpcError } from "@/lib/fundsRpc";
-import { getSupabaseFunds } from "@/lib/supabaseFunds";
+import { callRpc } from "@/lib/fundsRpc";
 import {
   validateExportQuery,
-  exportMaxRows,
   getComparisonMode,
   getAmountLabels,
   getBasisLabel,
   UNMAPPED_LABEL,
-  type ChangesResponse,
   type ComparisonMode,
 } from "@/lib/fundManager";
 
 export const dynamic = "force-dynamic";
 
+// Rows serialised per stream chunk. Bounds the size of any one string, not a query.
 const CHUNK = 1000;
+
+type ExportResult = { total_rows: number; rows: ExportRow[] };
 
 type ExportRow = {
   fund_manager: string;
@@ -106,38 +113,14 @@ export async function GET(request: Request) {
   if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
   const args = parsed.value;
 
-  const supabase = getSupabaseFunds();
-
-  // Pre-flight: block (never truncate) over the limit, and read the basis mode.
-  const limit = exportMaxRows();
-  const { data: probe, error: probeErr } = await supabase.rpc("get_fund_position_changes", {
-    p_manager: args.p_manager,
-    p_fund: args.p_fund,
-    p_start_date: args.p_start_date,
-    p_end_date: args.p_end_date,
-    p_lookback: args.p_lookback,
-    p_page: 1,
-    p_page_size: 50,
-    p_sort_column: "position_change",
-    p_sort_direction: "desc",
-    p_security_id_search: args.p_security_id_search,
-    p_description_search: args.p_description_search,
-    p_security_type: args.p_security_type,
-    p_sector_type: args.p_sector_type,
-    p_change_types: args.p_change_types,
-  });
-  if (probeErr) return mapRpcError(probeErr);
-  const probed = probe as ChangesResponse;
-  const total = probed?.pagination?.total_rows ?? 0;
-  if (total > limit) {
-    return NextResponse.json(
-      {
-        error: `export_limit_exceeded: ${total.toLocaleString()} rows exceed the ${limit.toLocaleString()}-row limit. Narrow the manager, fund, date range, or security filters and try again.`,
-      },
-      { status: 400 },
-    );
-  }
-  const mode = getComparisonMode(probed?.changes ?? [], probed?.fund_status ?? []);
+  // The RPC itself refuses (never truncates) over p_max_rows: export_limit_exceeded
+  // maps to a 400 in callRpc, before any byte of the file is written.
+  const res = await callRpc<ExportResult>("get_fund_position_changes_export_json", args);
+  if (res.error) return res.error;
+  const rows = res.data?.rows ?? [];
+  // Basis mode from the rows themselves. An empty result has no basis to read, so it
+  // gets the default (Par) headers — it is a header-only file either way.
+  const mode = getComparisonMode(rows as { comparison_basis: "PAR" | "MARKET_VALUE" }[]);
 
   const encoder = new TextEncoder();
   // In lookback mode there is no single window — each fund resolved its own — so
@@ -148,26 +131,22 @@ export async function GET(request: Request) {
       : `last-${args.p_lookback}-session${args.p_lookback === 1 ? "" : "s"}`;
   const filename = `fund-position-changes_${span}.csv`;
 
+  let offset = 0;
+  let headerSent = false;
   const stream = new ReadableStream<Uint8Array>({
-    async start(controller) {
-      try {
+    pull(controller) {
+      if (!headerSent) {
+        headerSent = true;
         controller.enqueue(encoder.encode(headerFor(mode).map(csvCell).join(",") + "\n"));
-        let offset = 0;
-        for (;;) {
-          const { data, error } = await supabase
-            .rpc("get_fund_position_changes_export", args)
-            .range(offset, offset + CHUNK - 1);
-          if (error) throw new Error(error.message);
-          const rows = (data ?? []) as ExportRow[];
-          if (rows.length === 0) break;
-          controller.enqueue(encoder.encode(rows.map((r) => toRow(r, mode)).join("\n") + "\n"));
-          offset += rows.length;
-          if (rows.length < CHUNK) break;
-        }
-        controller.close();
-      } catch (e) {
-        controller.error(e);
+        return;
       }
+      if (offset >= rows.length) {
+        controller.close();
+        return;
+      }
+      const slice = rows.slice(offset, offset + CHUNK);
+      offset += slice.length;
+      controller.enqueue(encoder.encode(slice.map((r) => toRow(r, mode)).join("\n") + "\n"));
     },
   });
 
