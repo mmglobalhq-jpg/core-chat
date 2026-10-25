@@ -128,14 +128,22 @@ it and cannot write to holdings data.
 | `/api/funds/latest-date?manager=&fund=` | GET | `get_fund_latest_as_of_date` | `{ latestDate }` |
 | `/api/funds/filter-options?manager=&fund=&start=&end=&preset=` | GET | `get_fund_filter_options` | `{ security_types, sector_types, sector_has_null }` |
 | `/api/funds/changes?…` | GET | `get_fund_position_changes` | `{ changes, fund_status, pagination }` |
-| `/api/funds/export?…` | GET | `get_fund_position_changes_export` | streamed `text/csv` |
+| `/api/funds/export?…` | GET | `get_fund_position_changes_export_json` (one call) | streamed `text/csv` |
 
 `NULL` (omitted / `all` / empty) manager and fund mean "all"; never a magic string.
 
 `filter-options` is scoped to the **two snapshots per fund actually being compared**
 (same date/preset resolution as the table). Unscoped, the RPC walks all of history —
 38.5 s for JP Morgan in production on 2026-09-14 — and offers values that cannot
-appear in the result. The page fetches it alongside the table, not before it.
+appear in the result. Even scoped it took 4.7 s until migration `0011` (the planner
+hashed all 1.17M holdings rows); it is ~0.15 s now. The page fetches it alongside
+the table, not before it.
+
+**Performance, measured on production 2026-10-25 (all managers):** table 0.65 s (1D)
+/ 0.99 s (30D) per request, filter options 0.14 s, export 1.5 s (1D) / 2.5 s (30D).
+Every page, sort or filter change re-runs the comparison; that is deliberate — a
+result cache would have to be invalidated against three pollers writing at different
+times, for ~0.6 s saved.
 
 `fund_status[]` carries, per fund: `comparison_basis`, `requested_*` and `actual_*`
 dates, `status`, `resolution_mode` (`date` / `lookback`), `matching_row_count`,
@@ -166,17 +174,25 @@ server-driven. No sensitive data is placed in the URL.
 
 ## CSV export
 
-`/api/funds/export` streams every matching row (all funds/pages, including Metadata
+`/api/funds/export` writes every matching row (all funds/pages, including Metadata
 Conflict and null-sector rows) with full `NUMERIC(38,10)` precision. If the result
 exceeds `FUNDS_EXPORT_MAX_ROWS` the export is **blocked** up-front with a clear
-message asking the user to narrow the query — never silently truncated. The response
-is streamed in bounded chunks so neither the server nor the browser holds the whole
-export in memory.
+message asking the user to narrow the query — never silently truncated.
+
+It makes **one** database call, `get_fund_position_changes_export_json` (poller
+migration `0011`), which computes the comparison once and returns every row in one
+JSON scalar. Until 2026-10-25 the route paged the row-set RPC 1,000 rows at a time
+(Supabase's max-rows); that RPC is PL/pgSQL, so PostgREST could not push
+LIMIT/OFFSET into it and **every chunk re-ran the whole comparison** — a 30-day
+all-manager export took ~24 s, now ~2.5 s. The trade: the route holds the rows in
+memory (bounded by `FUNDS_EXPORT_MAX_ROWS`) and emits the CSV incrementally, 1,000
+rows per stream chunk; the browser builds a Blob of the whole file either way.
 
 Headers are **basis-aware** (from a pre-flight probe): PAR-only uses `Par Amount` /
 `Par Change`; MARKET_VALUE-only uses `Market Value` / `Market Value Change`; mixed
 uses `Position Amount` / `Position Change` plus a `Comparison Basis` column
-(`PAR`→Par, `MARKET_VALUE`→Market Value). Values always come from
+(`PAR`→Par, `MARKET_VALUE`→Market Value). The mode is read from the returned rows, so an
+**empty** export (header only) always uses the Par headers. Values always come from
 `position_amount` / `position_change` as exact decimal strings (never floated). Null
 sectors export as **Unmapped**; null security types export **blank** (matching the
 existing `""` convention).
