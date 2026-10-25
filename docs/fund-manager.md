@@ -2,8 +2,17 @@
 
 The **Fund Manager** page (`/funds`, linked from the sidebar **Apps → Funds**)
 compares fund holdings between two requested dates and classifies each position as
-**Added / Removed / Increased / Decreased / Metadata Conflict**. It supports both
-**JP Morgan** (par-based) and **Allspring** (market-value-based) managers.
+**Added / Removed / Increased / Decreased / Metadata Conflict**. It covers three
+managers, each fed by its own poller into one shared schema:
+
+| Manager | Funds | Source | Basis | Cadence |
+|---|---|---|---|---|
+| **JP Morgan** | 9 ETFs (JAGG … JSCP) | daily PDF | `PAR` | daily, one business day in arrears |
+| **Allspring** | 6 portfolios (`AS_*`) | monthly HTML | `MARKET_VALUE` | month-end, ~3 weeks in arrears |
+| **Regan** | `MBSF`, `MBSX` | daily CSV | `PAR` | MBSX same-day (forward-dated across weekends); MBSF a business day behind it |
+
+The cadences differ *between and within* managers, and that is load-bearing for the
+date semantics below — see `system-source-of-truth/docs/26-fund-pollers.md` §13.
 
 All comparison logic lives in the poller's PostgreSQL RPCs (see the poller repo's
 README, "Fund Manager position-change RPCs"). This app only authenticates the chat
@@ -36,16 +45,42 @@ sales."
 `position_change = par_change`, `comparison_basis = PAR`. The fallback only fills
 absent keys — it never overrides valid new fields.
 
+## Date resolution
+
+Every fund resolves its own window; there is no single date pair shared across funds.
+
+- **Date mode** (Start + End typed). **Start is inclusive**: the comparison
+  *baseline* is the newest accepted snapshot **strictly before** Start, so a holding
+  added on the Start date shows as Added. End resolves to the newest snapshot **on or
+  before** End. Future dates are allowed. (Migration `0009`; before it, Start resolved
+  on-or-before too, so changes made on the Start date were invisible.)
+- **Preset mode** (`1D` / `7D` / `30D` / `1Y`). No dates are sent. Each fund compares
+  its newest snapshot against the one **N snapshots** earlier — 1 / 5 / 21 / 252
+  (`PRESET_LOOKBACK` in `lib/fundManager.ts`, RPC argument `p_lookback`). Snapshots
+  are trading days for these sources, so this is weekend-, holiday- and lag-aware
+  without the browser carrying a market calendar. A fund with less history is
+  clamped to its oldest snapshot. A preset wins over any stale `start`/`end` in the
+  URL.
+
+The resolved dates are shown per fund in the group header as
+`baseline DD/MM/YY → DD/MM/YY`. A fund that cannot be compared gets a status —
+`insufficient_history` (start and end resolved to the same snapshot),
+`no_start_snapshot`, or `no_end_snapshot` — with a reason, shown above the table.
+
 **Null sectors / security types:** a null `sector_type` displays as **Unmapped**
 (rows stay visible, sortable, filterable, paginated, exported, and counted); the
 sector filter offers "Unmapped" only when `sector_has_null` is true, and selecting it
 sends the token `__UNMAPPED__` to the RPC. The literal string "Unmapped" is never
 sent or stored. A null `security_type` displays as an em dash (—) with no sector or
-issuer substitution.
+issuer substitution. **Allspring and Regan publish no security-type column**, so every
+one of their rows is `—` and the Security Type filter only narrows JP Morgan rows.
+Their `sector_type` is derived conservatively from the security name and is often
+Unmapped by design.
 
 **Allspring fund dropdown:** each canonical portfolio appears once with a friendly
 name (e.g. *Core Plus Bond*), share-class aliases (STYAX / WIPIX / WFIPX) shown as
-secondary text and a tooltip. The share-class tickers are never separate options.
+secondary text and a tooltip. The share-class tickers are never separate options. JP Morgan and Regan funds show
+their ticker as-is.
 
 ## Architecture
 
@@ -91,25 +126,35 @@ it and cannot write to holdings data.
 | `/api/funds/options` | GET | `get_fund_managers`, `get_funds`, `get_fund_latest_as_of_date` | `{ managers, funds, latestDate }` |
 | `/api/funds/list?manager=` | GET | `get_funds` | `{ funds }` |
 | `/api/funds/latest-date?manager=&fund=` | GET | `get_fund_latest_as_of_date` | `{ latestDate }` |
-| `/api/funds/filter-options?manager=&fund=` | GET | `get_fund_filter_options` | `{ security_types, sector_types, sector_has_null }` |
+| `/api/funds/filter-options?manager=&fund=&start=&end=&preset=` | GET | `get_fund_filter_options` | `{ security_types, sector_types, sector_has_null }` |
 | `/api/funds/changes?…` | GET | `get_fund_position_changes` | `{ changes, fund_status, pagination }` |
 | `/api/funds/export?…` | GET | `get_fund_position_changes_export` | streamed `text/csv` |
 
 `NULL` (omitted / `all` / empty) manager and fund mean "all"; never a magic string.
 
+`filter-options` is scoped to the **two snapshots per fund actually being compared**
+(same date/preset resolution as the table). Unscoped, the RPC walks all of history —
+38.5 s for JP Morgan in production on 2026-09-14 — and offers values that cannot
+appear in the result. The page fetches it alongside the table, not before it.
+
+`fund_status[]` carries, per fund: `comparison_basis`, `requested_*` and `actual_*`
+dates, `status`, `resolution_mode` (`date` / `lookback`), `matching_row_count`,
+`warning_count` and `reason`. In lookback mode `requested_*` echoes the resolved
+dates, because the request *is* "this fund's Nth previous snapshot".
+
 ## URL parameter contract
 
 The page stores all comparison state in the URL so refreshes and browser
-back/forward work. The changes route reads the same names (minus `preset`):
+back/forward work. The changes and export routes read the same names:
 
 | Param | Meaning |
 |---|---|
 | `manager`, `fund` | scope (`""`/absent = all) |
-| `start`, `end` | requested dates, `YYYY-MM-DD` (any calendar date, incl. future) |
-| `preset` | `1D` / `7D` / `30D` / `1Y` (UI hint only, not sent to the RPC) |
+| `start`, `end` | requested dates, `YYYY-MM-DD` (any calendar date, incl. future); Start inclusive |
+| `preset` | `1D` / `7D` / `30D` / `1Y` → `p_lookback` 1 / 5 / 21 / 252 snapshots per fund. Replaces `start`/`end` (the page clears them); unknown values are rejected `400` |
 | `page` | 1-based page |
 | `page_size` | one of `50, 100, 250, 500` (others rejected `400`) |
-| `sort` | one of `security_id, description, security_type, sector_type, position_amount, position_change, par_amount, par_change, market_value_amount, market_value_change, change_type` (default `position_change`, abs-desc). The amount/change column headers map to `position_amount` / `position_change`; arbitrary UI labels are never used as sort keys. |
+| `sort` | one of `security_id, description, security_type, sector_type, position_amount, position_change, par_amount, par_change, market_value_amount, market_value_change, change_type` (default `position_change`, abs-desc). The amount/change column headers map to `position_amount` / `position_change`; arbitrary UI labels are never used as sort keys. Rows are always ordered by fund first and Metadata Conflict rows last within a fund; the sort applies inside that. |
 | `dir` | `asc` / `desc` |
 | `q_security`, `q_description` | case-insensitive partial text filters (debounced 300 ms) |
 | `f_security_type`, `f_sector_type` | exact dropdown filters; `f_sector_type=__UNMAPPED__` selects null-sector rows |
@@ -136,6 +181,11 @@ uses `Position Amount` / `Position Change` plus a `Comparison Basis` column
 sectors export as **Unmapped**; null security types export **blank** (matching the
 existing `""` convention).
 
+Filenames: `fund-position-changes_<start>_<end>.csv` in date mode, and
+`fund-position-changes_<preset>.csv` in preset mode, since there is no single date
+window to name. (The route's own `Content-Disposition` says `last-N-sessions`, but the
+page sets the download name itself, so that is what a browser user sees.)
+
 ## Column / group persistence
 
 Column order, visibility, and widths persist in `localStorage`
@@ -152,9 +202,19 @@ pnpm dev                           # http://localhost:3000/funds
 
 Without `FUNDS_*` set, the `/api/funds/*` routes return a 502; the page renders but
 shows a load error. Point `FUNDS_SUPABASE_URL`/`FUNDS_SUPABASE_SERVICE_ROLE_KEY` at
-a poller project that has the `0004_comparison_basis` migration applied (adds the
-basis-aware RPC contract: `comparison_basis`, `position_*`, `market_value_*`, and
-`sector_has_null`).
+a poller project migrated to **`0009_inclusive_start`** (the
+`jp-fund-pdf-poller` repo owns every migration). `0004` added the basis-aware
+contract (`comparison_basis`, `position_*`, `market_value_*`, `sector_has_null`);
+`0009` changed five RPC signatures to add `p_lookback` and the date-scoped
+`get_fund_filter_options`. Against a pre-`0009` database the **whole table** fails
+(the changes and export routes always send `p_lookback`, null in date mode) and the
+filter dropdowns silently come back empty, because PostgREST finds no function with
+those argument names.
+
+**Before changing an RPC signature**, exercise every consumer of the shared schema,
+not just this page: the JP, Allspring and Regan repos' integration tests also encode
+the RPC contract (doc 26 §13: one Allspring test still assumed the pre-`0009` Start
+convention and had not been re-run).
 
 ## Tests
 
@@ -167,8 +227,10 @@ pnpm build
 
 ## Deployment notes
 
-The Docker image is built from this repo (`Dockerfile`); the deploy stack (compose
-+ Cloudflare tunnel) lives in the external core-* stack. Add `FUNDS_SUPABASE_URL`,
-`FUNDS_SUPABASE_SERVICE_ROLE_KEY`, and optionally `FUNDS_EXPORT_MAX_ROWS` to the
-server environment there. These are **runtime server** vars (not build ARGs) and
+The Docker image is built from this repo (`Dockerfile`) and deployed with the rest of
+the stack in `~/projects/docker-compose.yml` (see
+`system-source-of-truth/docs/12-deployment-and-rollback.md`). `FUNDS_SUPABASE_URL`,
+`FUNDS_SUPABASE_SERVICE_ROLE_KEY` (credential S-21; rotation in
+`docs/funds-credential-rotation.md`) and optionally `FUNDS_EXPORT_MAX_ROWS` live in
+`~/projects/.env`. These are **runtime server** vars (not build ARGs) and
 must **not** be `NEXT_PUBLIC_` — they must never be inlined into the client bundle.
