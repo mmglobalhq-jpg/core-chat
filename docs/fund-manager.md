@@ -18,6 +18,38 @@ All comparison logic lives in the poller's PostgreSQL RPCs (see the poller repo'
 README, "Fund Manager position-change RPCs"). This app only authenticates the chat
 user, validates inputs, calls those RPCs server-side, and renders the result.
 
+## Holdings tab (added 2026-10-25)
+
+`/funds?tab=holdings` lists **every fund's current holdings** (its latest accepted snapshot
+— the same snapshot the Changes tab resolves to) as **one list across all funds**, newest
+**Last Change** first. Design: `docs/superpowers/specs/2026-10-25-fund-holdings-tab-design.md`.
+
+- **Last Change** = when the bond was **added** or its **par moved** (Added / Par ↑ / Par ↓).
+  A par **decrease of 5% or less is a mortgage paydown** and does not count; increases and
+  decreases over 5% do. Allspring (market value only) shows only when a bond was added.
+  Bonds unchanged since our records began show "unchanged since DD/MM/YY" (PAR) or "held
+  since DD/MM/YY" (MV), never an invented date.
+- **Changed** filter: any time / last day / last week / last month, counted in each fund's
+  own **sessions** (1 / 5 / 21 snapshots), like the Changes presets.
+- Columns: Fund · As of · CUSIP / Security ID · Description · Security Type · Sector Type ·
+  amount (basis-aware) · Last Change. Same search/type/sector filters, column layout
+  (stored separately: `fundmgr:holdings-layout`), paging and CSV export as Changes.
+- **Stale notice:** if a fund's last-change data lags its latest snapshot, a notice names
+  it. The data is maintained by a database trigger on every snapshot commit
+  (`system-source-of-truth` doc 07 §2.4b).
+- Tabs share only `manager` and `fund` in the URL. Holdings' own state is `h_*` + `changed`;
+  each tab's query survives switching. Holdings loads immediately (no Submit).
+
+| Route | RPC |
+|---|---|
+| `/api/funds/holdings?…` | `get_fund_holdings` |
+| `/api/funds/holdings/export?…` | `get_fund_holdings_export_json` (one call; blocked over `FUNDS_EXPORT_MAX_ROWS`) |
+| `/api/funds/holdings/filter-options?manager=&fund=` | `get_fund_holdings_filter_options` |
+
+**Measured on production 2026-10-25:** ~1.3 s per request for All Managers (export ~2.8 s) —
+over the ~1 s design target; speeding up `fm_holdings_core` is an open follow-up. Requires
+poller migrations `0012`/`0013`.
+
 ## Comparison basis (PAR vs MARKET_VALUE)
 
 Each row carries a `comparison_basis` of `PAR` or `MARKET_VALUE`, and a canonical
