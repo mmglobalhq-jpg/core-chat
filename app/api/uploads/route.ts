@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { backendHeaders, backendUrl } from "@/lib/backendProxy";
+import { requireUser } from "@/lib/reqUser";
 
 /**
  * Server-side proxy to core-heartbeat's `/uploads` endpoints (Settings → File
@@ -22,6 +23,12 @@ const READ_TIMEOUT_MS = 30_000;
 type StreamingInit = RequestInit & { duplex: "half" };
 
 export async function POST(request: Request): Promise<Response> {
+  // Gate BEFORE touching the body or the backend: core-heartbeat maps a missing or
+  // unverifiable token to its sandbox user, so this route is the only check that the
+  // caller is a signed-in, APPROVED user (lib/reqUser.ts).
+  const gate = await requireUser(request);
+  if ("error" in gate) return gate.error;
+
   const filename = request.headers.get("x-upload-filename") ?? "";
   if (!filename.trim()) {
     return NextResponse.json({ detail: "X-Upload-Filename is required" }, { status: 400 });
@@ -51,6 +58,12 @@ export async function POST(request: Request): Promise<Response> {
 }
 
 export async function GET(request: Request): Promise<Response> {
+  // Gate BEFORE touching the body or the backend: core-heartbeat maps a missing or
+  // unverifiable token to its sandbox user, so this route is the only check that the
+  // caller is a signed-in, APPROVED user (lib/reqUser.ts).
+  const gate = await requireUser(request);
+  if ("error" in gate) return gate.error;
+
   try {
     const res = await fetch(backendUrl("/uploads"), {
       headers: backendHeaders(request),
@@ -67,6 +80,12 @@ export async function GET(request: Request): Promise<Response> {
 }
 
 export async function DELETE(request: Request): Promise<Response> {
+  // Gate BEFORE touching the body or the backend: core-heartbeat maps a missing or
+  // unverifiable token to its sandbox user, so this route is the only check that the
+  // caller is a signed-in, APPROVED user (lib/reqUser.ts).
+  const gate = await requireUser(request);
+  if ("error" in gate) return gate.error;
+
   const name = new URL(request.url).searchParams.get("name") ?? "";
   if (!name) {
     return NextResponse.json({ detail: "name is required" }, { status: 400 });

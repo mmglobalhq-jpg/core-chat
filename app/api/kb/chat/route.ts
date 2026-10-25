@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { backendHeaders, backendUrl } from "@/lib/backendProxy";
+import { requireUser } from "@/lib/reqUser";
 
 /**
  * Streaming proxy for Knowledge chat → core-heartbeat POST /kb/chat/stream.
@@ -45,6 +46,12 @@ function toTurns(raw: unknown): Turn[] {
 }
 
 export async function POST(request: Request) {
+  // Gate BEFORE touching the body or the backend: core-heartbeat maps a missing or
+  // unverifiable token to its sandbox user, so this route is the only check that the
+  // caller is a signed-in, APPROVED user (lib/reqUser.ts).
+  const gate = await requireUser(request);
+  if ("error" in gate) return gate.error;
+
   let body: Record<string, unknown>;
   try {
     body = (await request.json()) as Record<string, unknown>;

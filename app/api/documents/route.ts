@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { backendHeaders, backendUrl } from "@/lib/backendProxy";
+import { requireUser } from "@/lib/reqUser";
 
 /**
  * Server-side proxy to the core-heartbeat `POST /documents/parse` endpoint.
@@ -9,6 +10,12 @@ import { backendHeaders, backendUrl } from "@/lib/backendProxy";
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
+  // Gate BEFORE touching the body or the backend: core-heartbeat maps a missing or
+  // unverifiable token to its sandbox user, so this route is the only check that the
+  // caller is a signed-in, APPROVED user (lib/reqUser.ts).
+  const gate = await requireUser(request);
+  if ("error" in gate) return gate.error;
+
   let body: { doc_id?: unknown; filename?: unknown; content_type?: unknown };
   try {
     body = await request.json();

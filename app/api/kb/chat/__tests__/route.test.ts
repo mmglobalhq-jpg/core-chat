@@ -1,4 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+// The route is gated by requireUser (an approved, signed-in user); these tests are
+// about what happens AFTER the gate, so they run as an approved user. The gate itself
+// is covered in app/api/__tests__/authGate.test.ts.
+vi.mock("@/lib/reqUser", () => ({
+  requireUser: async () => ({ user: { id: "u1" }, token: "jwt" }),
+}));
+
 import { POST } from "@/app/api/kb/chat/route";
 
 afterEach(() => vi.unstubAllGlobals());

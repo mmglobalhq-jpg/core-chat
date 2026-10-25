@@ -1,11 +1,18 @@
 import { NextResponse } from "next/server";
 import { backendHeaders, backendUrl } from "@/lib/backendProxy";
+import { requireUser } from "@/lib/reqUser";
 
 // Delete a document from the knowledge base. ?scope=private|global — the gateway
 // gates global deletes on admin. Proxies to the core-heartbeat gateway.
 export const dynamic = "force-dynamic";
 
 export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  // Gate BEFORE touching the body or the backend: core-heartbeat maps a missing or
+  // unverifiable token to its sandbox user, so this route is the only check that the
+  // caller is a signed-in, APPROVED user (lib/reqUser.ts).
+  const gate = await requireUser(request);
+  if ("error" in gate) return gate.error;
+
   const { id } = await params;
   const scope = new URL(request.url).searchParams.get("scope") ?? "private";
   try {

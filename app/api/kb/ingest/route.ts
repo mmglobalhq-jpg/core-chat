@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { backendHeaders, backendUrl } from "@/lib/backendProxy";
+import { requireUser } from "@/lib/reqUser";
 
 // Add an already-uploaded document to the knowledge base (async → returns job_id).
 // Body: { doc_id, filename, content_type?, scope? }. The gateway gates scope=global
@@ -7,6 +8,12 @@ import { backendHeaders, backendUrl } from "@/lib/backendProxy";
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
+  // Gate BEFORE touching the body or the backend: core-heartbeat maps a missing or
+  // unverifiable token to its sandbox user, so this route is the only check that the
+  // caller is a signed-in, APPROVED user (lib/reqUser.ts).
+  const gate = await requireUser(request);
+  if ("error" in gate) return gate.error;
+
   const body = await request.json().catch(() => ({}));
   try {
     const res = await fetch(backendUrl("/kb/ingest"), {

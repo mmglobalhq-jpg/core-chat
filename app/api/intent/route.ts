@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { backendHeaders, backendUrl, toTurns } from "@/lib/backendProxy";
+import { requireUser } from "@/lib/reqUser";
 
 /**
  * Streaming server-side proxy to the core-heartbeat FastAPI gateway.
@@ -31,6 +32,12 @@ function toModelPreference(uiModel: unknown): string {
 }
 
 export async function POST(request: Request) {
+  // Gate BEFORE touching the body or the backend: core-heartbeat maps a missing or
+  // unverifiable token to its sandbox user, so this route is the only check that the
+  // caller is a signed-in, APPROVED user (lib/reqUser.ts).
+  const gate = await requireUser(request);
+  if ("error" in gate) return gate.error;
+
   let text: string;
   let modelPreference: string;
   let history;
