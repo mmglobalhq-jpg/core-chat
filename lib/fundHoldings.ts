@@ -12,6 +12,7 @@ import {
   PRESET_LOOKBACK,
   SORT_DIRECTIONS,
   exportMaxRows,
+  optText,
   type ComparisonBasis,
   type Pagination,
   type SortDirection,
@@ -98,14 +99,6 @@ export type HoldingsExportRpcArgs = Omit<
 // The "changed within" filter offers the same trading-day presets as the Changes
 // range picker, minus 1Y: a holdings filter that long is meaningless.
 const CHANGED_PRESETS = ["1D", "7D", "30D"] as const;
-
-/** A trimmed, non-empty string, or null. "all" / "" collapse to null (means all). */
-function optText(value: string | null): string | null {
-  if (value == null) return null;
-  const t = value.trim();
-  if (t === "" || t.toLowerCase() === "all") return null;
-  return t;
-}
 
 /** Validate the query params for the paginated holdings route into RPC args. */
 export function validateHoldingsQuery(sp: URLSearchParams): ValidationResult<HoldingsRpcArgs> {

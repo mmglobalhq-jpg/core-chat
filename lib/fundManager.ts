@@ -176,7 +176,7 @@ export function parseIsoDate(value: string | null | undefined): string | null {
 }
 
 /** A trimmed, non-empty string, or null. "all" / "" collapse to null (means all). */
-function optText(value: string | null | undefined): string | null {
+export function optText(value: string | null | undefined): string | null {
   if (value == null) return null;
   const t = value.trim();
   if (t === "" || t.toLowerCase() === "all") return null;
