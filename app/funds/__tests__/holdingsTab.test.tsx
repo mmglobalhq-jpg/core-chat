@@ -472,6 +472,56 @@ describe("Holdings tab", () => {
     expect(url.get("changed")).toBe("7D");
   });
 
+  it("submitting Changes in a new scope drops the Holdings page and dropdown filters", async () => {
+    // Mirror of the Holdings scope change above. The Holdings page number and its
+    // Security/Sector Type values belong to the old scope: carried over, Holdings would
+    // open on "Page 4 / 1" or apply a filter its dropdowns can't show.
+    currentParams = new URLSearchParams({
+      start: "2026-10-01",
+      end: "2026-10-23",
+      h_page: "4",
+      h_f_security_type: "TREASURY NOTES",
+      h_f_sector_type: "UST",
+      h_sort: "description",
+      h_q_security: "912",
+      changed: "7D",
+    });
+    vi.stubGlobal("fetch", mockFetch());
+    render(<FundsPage />);
+    await screen.findByText(/No position changes found/);
+    await screen.findByRole("option", { name: "Regan" });
+
+    fireEvent.change(screen.getByLabelText("Fund Manager"), { target: { value: "Regan" } });
+    fireEvent.click(screen.getByText("Submit"));
+    const url = lastUrl(push);
+    expect(url.get("manager")).toBe("Regan");
+    expect(url.get("h_page")).toBeNull();
+    expect(url.get("h_f_security_type")).toBeNull();
+    expect(url.get("h_f_sector_type")).toBeNull();
+    // Scope-independent choices survive, as on the Holdings side.
+    expect(url.get("h_sort")).toBe("description");
+    expect(url.get("h_q_security")).toBe("912");
+    expect(url.get("changed")).toBe("7D");
+  });
+
+  it("submitting Changes in the same scope keeps the Holdings page and filters", async () => {
+    currentParams = new URLSearchParams({
+      manager: "Regan",
+      start: "2026-10-01",
+      end: "2026-10-23",
+      h_page: "4",
+      h_f_sector_type: "UST",
+    });
+    vi.stubGlobal("fetch", mockFetch());
+    render(<FundsPage />);
+    await screen.findByText(/No position changes found/);
+
+    fireEvent.click(screen.getByText("Submit"));
+    const url = lastUrl(push);
+    expect(url.get("h_page")).toBe("4");
+    expect(url.get("h_f_sector_type")).toBe("UST");
+  });
+
   it("the header clears the iPhone status bar and has 44pt touch targets on touch", async () => {
     currentParams = new URLSearchParams({ tab: "holdings" });
     vi.stubGlobal("fetch", mockFetch());

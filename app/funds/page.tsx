@@ -348,8 +348,14 @@ function FundManagerPage() {
     }
     next.set("page", "1");
     next.set("page_size", sp.get("page_size") ?? String(DEFAULT_PAGE_SIZE));
-    // The Holdings tab's query (h_* and `changed`) is not this comparison's to reset.
+    // The Holdings tab's query (h_* and `changed`) is not this comparison's to reset —
+    // except its page and dropdown filters when the scope changes, which belong to the
+    // old scope (the mirror of HoldingsTab's setScope clearing `page` and `f_*`).
+    const scopeChanged =
+      draft.manager !== (sp.get("manager") ?? "") || draft.fund !== (sp.get("fund") ?? "");
+    const scoped = new Set(["h_page", "h_f_security_type", "h_f_sector_type"]);
     for (const [k, v] of sp.entries()) {
+      if (scopeChanged && scoped.has(k)) continue;
       if (k.startsWith("h_") || k === "changed") next.set(k, v);
     }
     router.push(`/funds?${next.toString()}`);

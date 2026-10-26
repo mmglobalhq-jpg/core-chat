@@ -39,6 +39,10 @@ user, validates inputs, calls those RPCs server-side, and renders the result.
   (`system-source-of-truth` doc 07 §2.4b).
 - Tabs share only `manager` and `fund` in the URL. Holdings' own state is `h_*` + `changed`;
   each tab's query survives switching. Holdings loads immediately (no Submit).
+  A scope change on either tab drops the *other* tab's page and dropdown filters
+  (Holdings clears `page`/`f_*`; a Changes Submit into a new scope clears
+  `h_page`/`h_f_*`); search text, sort and `changed` are kept. Until 2026-10-26 the
+  Changes side kept them, so Holdings could open on an empty out-of-range page.
 
 | Route | RPC |
 |---|---|
