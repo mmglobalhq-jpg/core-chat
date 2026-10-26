@@ -50,9 +50,11 @@ user, validates inputs, calls those RPCs server-side, and renders the result.
 | `/api/funds/holdings/export?…` | `get_fund_holdings_export_json` (one call; blocked over `FUNDS_EXPORT_MAX_ROWS`) |
 | `/api/funds/holdings/filter-options?manager=&fund=` | `get_fund_holdings_filter_options` |
 
-**Measured on production 2026-10-25:** ~1.3 s per request for All Managers (export ~2.8 s) —
-over the ~1 s design target; speeding up `fm_holdings_core` is an open follow-up. Requires
-poller migrations `0012`/`0013`.
+**Measured on production 2026-10-26:** ~0.56 s per request for All Managers through PostgREST
+(~0.49 s in psql), within the ~1 s design target, since poller migration `0014`; it was ~1.3 s
+under `0013` (the function's parameter-blind plan aggregated the holdings once per fund — see
+`system-source-of-truth` doc 07 §2.4b). Export ~1.8 s for all 20,486 rows. Requires poller
+migrations `0012`–`0014`.
 
 ## Comparison basis (PAR vs MARKET_VALUE)
 
