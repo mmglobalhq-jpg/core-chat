@@ -88,6 +88,25 @@ describe("Sidebar Apps section", () => {
   });
 });
 
+describe("Sidebar Trace entry", () => {
+  it("links Trace to /trace under Apps, alongside the existing entries", () => {
+    renderSidebar();
+    expect(screen.getByRole("link", { name: "Trace" })).toHaveAttribute("href", "/trace");
+    for (const [name, href] of [["Funds", "/funds"], ["REIT", "/reits"], ["Notes", "/notes"]]) {
+      expect(screen.getByRole("link", { name })).toHaveAttribute("href", href);
+    }
+  });
+
+  it("marks Trace active only when on /trace", () => {
+    renderSidebar();
+    expect(screen.getByRole("link", { name: "Trace" })).not.toHaveAttribute("aria-current", "page");
+    pathname = "/trace";
+    renderSidebar();
+    expect(screen.getAllByRole("link", { name: "Trace" }).at(-1)!).toHaveAttribute("aria-current", "page");
+    expect(screen.getAllByRole("link", { name: "Notes" }).at(-1)!).not.toHaveAttribute("aria-current", "page");
+  });
+});
+
 describe("Sidebar chat switch", () => {
   it("links Chat to / and Knowledge to /knowledge, marking the current one", () => {
     renderSidebar();

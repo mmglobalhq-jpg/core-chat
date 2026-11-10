@@ -11,6 +11,7 @@ import {
   NotebookPen,
   PanelLeftClose,
   Plus,
+  Radar,
   X,
 } from "lucide-react";
 import {
@@ -258,6 +259,19 @@ function SidebarBody({
           <Link href="/notes" aria-current={pathname === "/notes" ? "page" : undefined}>
             <NotebookPen className="size-4" />
             <span className="text-sm">Notes</span>
+          </Link>
+        </Button>
+        <Button
+          asChild
+          variant="ghost"
+          className={cn(
+            "w-full justify-start gap-2 text-sidebar-foreground",
+            pathname === "/trace" && "bg-sidebar-accent text-sidebar-accent-foreground",
+          )}
+        >
+          <Link href="/trace" aria-current={pathname === "/trace" ? "page" : undefined}>
+            <Radar className="size-4" />
+            <span className="text-sm">Trace</span>
           </Link>
         </Button>
       </div>
