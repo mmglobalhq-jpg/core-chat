@@ -88,6 +88,29 @@ export async function deleteUpload(name: string): Promise<boolean> {
   return res.ok;
 }
 
+/**
+ * Download one file from the mini PC. Two steps because a browser download is a
+ * plain navigation and cannot send the Bearer header: an authenticated request
+ * mints a short-lived signed ticket for this one file, then the browser navigates
+ * to it — which lets iOS Safari hand a large audiobook to its download manager
+ * instead of holding it in page memory. Never throws; returns the error.
+ */
+export async function downloadFromMiniPc(name: string): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const res = await fetch("/api/uploads/download-ticket", {
+      method: "POST",
+      headers: { Authorization: await authHeader(), "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    const d = (await res.json().catch(() => ({}))) as { ticket?: string; detail?: string };
+    if (!res.ok || !d.ticket) return { ok: false, error: d.detail ?? `HTTP ${res.status}` };
+    window.location.assign(`/api/uploads/download?t=${encodeURIComponent(d.ticket)}`);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "network error" };
+  }
+}
+
 /** "4.2 MB" — sizes here span a text note to a 100 MB video. */
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;

@@ -46,6 +46,8 @@ const CASES: [string, () => Promise<Handler>, () => Request][] = [
     () => post("/api/uploads", "x", { "x-upload-filename": "f.txt" })],
   ["GET /api/uploads", async () => (await import("@/app/api/uploads/route")).GET as Handler,
     () => new Request("https://app/api/uploads")],
+  ["POST /api/uploads/download-ticket", async () => (await import("@/app/api/uploads/download-ticket/route")).POST as Handler,
+    () => post("/api/uploads/download-ticket", { name: "f.m4b" })],
   ["DELETE /api/uploads", async () => (await import("@/app/api/uploads/route")).DELETE as Handler,
     () => new Request("https://app/api/uploads?name=f.txt", { method: "DELETE" })],
   ["POST /api/kb/chat", async () => (await import("@/app/api/kb/chat/route")).POST as Handler,
@@ -90,6 +92,8 @@ describe("backend proxy routes refuse unauthenticated or unapproved callers", ()
 const UNGATED_ALLOWLIST: Record<string, string> = {
   "integrations/google/callback/route.ts":
     "OAuth redirect from Google carries no Bearer token; protected by the HMAC-signed `state` (verifyState)",
+  "uploads/download/route.ts":
+    "Browser download navigation carries no Bearer token; protected by core-heartbeat's HMAC-signed, file-bound, 15-minute ticket minted only via the admin-gated /download-ticket route",
 };
 
 function routeFiles(dir: string): string[] {

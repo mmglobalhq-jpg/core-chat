@@ -2,8 +2,8 @@
 
 /**
  * Settings → File Upload. Sends files from the browser (including an iPhone) to
- * the mini PC's Windows folder, C:\Users\MMGlobal\Uploads, and lists/deletes what
- * is already there.
+ * the mini PC's Windows folder, C:\Users\MMGlobal\Uploads, and lists, downloads and
+ * deletes what is already there (finished audiobooks are copied in automatically).
  *
  * Admin-only, but note that the hiding happens in SettingsMenu for tidiness only —
  * the real gate is profiles.is_admin checked in core-heartbeat on every verb.
@@ -15,11 +15,12 @@
  * backend's folder-size budget honest.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertCircle, Check, FileUp, HardDrive, Loader2, Trash2, Upload } from "lucide-react";
+import { AlertCircle, Check, Download, FileUp, HardDrive, Loader2, Trash2, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
   deleteUpload,
+  downloadFromMiniPc,
   formatBytes,
   listUploads,
   uploadToMiniPc,
@@ -44,6 +45,8 @@ export function FileUploadSection() {
   const [loadingList, setLoadingList] = useState(true);
   const [dragging, setDragging] = useState(false);
   const [confirming, setConfirming] = useState<string | null>(null);
+  const [downloading, setDownloading] = useState<string | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const busy = items.some((i) => i.status === "uploading" || i.status === "queued");
 
@@ -91,6 +94,14 @@ export function FileUploadSection() {
     e.preventDefault();
     setDragging(false);
     if (e.dataTransfer.files?.length) void enqueue(e.dataTransfer.files);
+  };
+
+  const download = async (name: string) => {
+    setDownloadError(null);
+    setDownloading(name);
+    const res = await downloadFromMiniPc(name);
+    setDownloading(null);
+    if (!res.ok) setDownloadError(`${name}: ${res.error}`);
   };
 
   const remove = async (name: string) => {
@@ -221,19 +232,35 @@ export function FileUploadSection() {
                     </Button>
                   </span>
                 ) : (
-                  <button
-                    type="button"
-                    aria-label={`Delete ${f.name}`}
-                    onClick={() => setConfirming(f.name)}
-                    className="-m-2 shrink-0 rounded-lg p-2 text-muted-foreground hover:bg-muted hover:text-destructive"
-                  >
-                    <Trash2 className="size-4" />
-                  </button>
+                  <span className="-my-2 flex shrink-0 items-center">
+                    <button
+                      type="button"
+                      aria-label={`Download ${f.name}`}
+                      onClick={() => void download(f.name)}
+                      disabled={downloading === f.name}
+                      className="shrink-0 rounded-lg p-2 text-muted-foreground hover:bg-muted hover:text-primary"
+                    >
+                      {downloading === f.name ? (
+                        <Loader2 className="size-4 animate-spin" />
+                      ) : (
+                        <Download className="size-4" />
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`Delete ${f.name}`}
+                      onClick={() => setConfirming(f.name)}
+                      className="-mr-2 shrink-0 rounded-lg p-2 text-muted-foreground hover:bg-muted hover:text-destructive"
+                    >
+                      <Trash2 className="size-4" />
+                    </button>
+                  </span>
                 )}
               </li>
             ))}
           </ul>
         )}
+        {downloadError && <p className="text-xs text-destructive">{downloadError}</p>}
       </div>
 
       <p className="text-xs text-muted-foreground">
