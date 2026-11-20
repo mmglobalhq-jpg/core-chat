@@ -12,6 +12,8 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/lib/supabaseClient", () => ({
   supabase: { auth: { signOut: async () => ({}) } },
 }));
+let isAdmin = false;
+vi.mock("@/lib/useIsAdmin", () => ({ useIsAdmin: () => isAdmin }));
 const storeState = (title: string) => ({
   conversations: [{ id: title, title, messages: [], updatedAt: 1, persisted: true }],
   activeConversationId: null,
@@ -104,6 +106,22 @@ describe("Sidebar Trace entry", () => {
     renderSidebar();
     expect(screen.getAllByRole("link", { name: "Trace" }).at(-1)!).toHaveAttribute("aria-current", "page");
     expect(screen.getAllByRole("link", { name: "Notes" }).at(-1)!).not.toHaveAttribute("aria-current", "page");
+  });
+});
+
+describe("Sidebar Audiobooks entry", () => {
+  it("is hidden from a non-admin", () => {
+    isAdmin = false;
+    renderSidebar();
+    expect(screen.queryByRole("link", { name: "Audiobooks" })).toBeNull();
+  });
+
+  it("links an admin to /audiobooks, alongside the existing entries", () => {
+    isAdmin = true;
+    renderSidebar();
+    expect(screen.getByRole("link", { name: "Audiobooks" })).toHaveAttribute("href", "/audiobooks");
+    expect(screen.getByRole("link", { name: "Trace" })).toHaveAttribute("href", "/trace");
+    isAdmin = false;
   });
 });
 

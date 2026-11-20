@@ -61,6 +61,12 @@ const CASES: [string, () => Promise<Handler>, () => Request][] = [
     () => new Request("https://app/api/kb/documents/x", { method: "DELETE" })],
   ["GET /api/kb/jobs/[id]", async () => (await import("@/app/api/kb/jobs/[id]/route")).GET as Handler,
     () => new Request("https://app/api/kb/jobs/x")],
+  ["GET /api/audiobooks/jobs", async () => (await import("@/app/api/audiobooks/[...path]/route")).GET as unknown as Handler,
+    () => new Request("https://app/api/audiobooks/jobs")],
+  ["POST /api/audiobooks/jobs", async () => (await import("@/app/api/audiobooks/[...path]/route")).POST as unknown as Handler,
+    () => post("/api/audiobooks/jobs", { upload: "b.epub" })],
+  ["DELETE /api/audiobooks/jobs/[id]", async () => (await import("@/app/api/audiobooks/[...path]/route")).DELETE as unknown as Handler,
+    () => new Request("https://app/api/audiobooks/jobs/0123456789abcdef", { method: "DELETE" })],
 ];
 
 describe("backend proxy routes refuse unauthenticated or unapproved callers", () => {

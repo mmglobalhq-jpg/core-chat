@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   BarChart3,
   BookOpen,
+  Headphones,
   Building2,
   LogOut,
   MessageSquare,
@@ -27,6 +28,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { useChatStore, useKnowledgeChatStore } from "@/store/useChatStore";
 import type { ChatKind } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { useIsAdmin } from "@/lib/useIsAdmin";
 
 interface SidebarProps {
   /** Which chat's history this sidebar lists. Main chat by default. */
@@ -104,6 +106,7 @@ function SidebarBody({
   const hideConversation = useStore((s) => s.hideConversation);
   const router = useRouter();
   const pathname = usePathname();
+  const isAdmin = useIsAdmin();
 
   async function handleSignOut() {
     await supabase.auth.signOut();
@@ -274,6 +277,22 @@ function SidebarBody({
             <span className="text-sm">Trace</span>
           </Link>
         </Button>
+        {/* Admin-only (enforced in core-heartbeat; hiding the link is just tidiness). */}
+        {isAdmin && (
+          <Button
+            asChild
+            variant="ghost"
+            className={cn(
+              "w-full justify-start gap-2 text-sidebar-foreground",
+              pathname === "/audiobooks" && "bg-sidebar-accent text-sidebar-accent-foreground",
+            )}
+          >
+            <Link href="/audiobooks" aria-current={pathname === "/audiobooks" ? "page" : undefined}>
+              <Headphones className="size-4" />
+              <span className="text-sm">Audiobooks</span>
+            </Link>
+          </Button>
+        )}
       </div>
 
       {/* Bottom: Settings (opens a bottom-left popup menu) + Sign out. */}
