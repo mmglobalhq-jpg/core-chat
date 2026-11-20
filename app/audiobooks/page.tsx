@@ -501,9 +501,10 @@ function Review(props: {
         </label>
       </div>
 
-      <fieldset>
+      {/* min-w-0: a fieldset defaults to min-content width and would push long voice descriptions off a phone screen. */}
+      <fieldset className="min-w-0">
         <legend className="text-sm font-medium">Voice</legend>
-        <div className="mt-2 grid gap-2 sm:grid-cols-2">
+        <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
           {(props.voices?.voices ?? []).map((v) => (
             <div
               key={v.id}
@@ -540,7 +541,7 @@ function Review(props: {
         </div>
       </fieldset>
 
-      <fieldset>
+      <fieldset className="min-w-0">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <legend className="text-sm font-medium">
             Chapters <span className="font-normal text-muted-foreground">({picked.size} of {chapters.length} ticked)</span>
