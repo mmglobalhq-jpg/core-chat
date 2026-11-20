@@ -30,7 +30,7 @@ describe("allowedPath", () => {
     ["POST", ["jobs", JOB, "retry"], `/audiobooks/jobs/${JOB}/retry`],
     ["DELETE", ["jobs", JOB], `/audiobooks/jobs/${JOB}`],
   ])("%s %j -> %s", async (method, parts, want) => {
-    const { allowedPath } = await import("@/app/api/audiobooks/[...path]/route");
+    const { allowedPath } = await import("@/lib/audiobooksProxy");
     expect(allowedPath(method, parts)).toBe(want);
   });
 
@@ -46,7 +46,7 @@ describe("allowedPath", () => {
     ["GET", ["kb", "documents"]],
     ["GET", []],
   ])("refuses %s %j", async (method, parts) => {
-    const { allowedPath } = await import("@/app/api/audiobooks/[...path]/route");
+    const { allowedPath } = await import("@/lib/audiobooksProxy");
     expect(allowedPath(method, parts)).toBeNull();
   });
 });
